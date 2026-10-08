@@ -1,0 +1,96 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+
+export default function Shelf({ title, subtitle, viewAllHref, children }) {
+  const scrollerRef = useRef(null);
+  const trackRef = useRef(null);
+  const [edges, setEdges] = useState({ start: true, end: true });
+
+  const update = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const next = {
+      start: el.scrollLeft <= 4,
+      end: el.scrollLeft + el.clientWidth >= el.scrollWidth - 4,
+    };
+    setEdges((current) =>
+      current.start === next.start && current.end === next.end ? current : next
+    );
+  }, []);
+
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    const track = trackRef.current;
+    if (!scroller || !track) return;
+
+    const observer = new ResizeObserver(update);
+    observer.observe(scroller);
+    observer.observe(track);
+    return () => observer.disconnect();
+  }, [update]);
+
+  const scrollByPage = (direction) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollBy({ left: direction * el.clientWidth * 0.85, behavior: "smooth" });
+  };
+
+  const arrowClass = (hidden) =>
+    `absolute top-20 z-10 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-accent text-accent-ink shadow-[0_3px_0_0_var(--accent-lip)] transition duration-200 md:flex ${
+      hidden ? "pointer-events-none scale-75 opacity-0" : "scale-100 opacity-100"
+    }`;
+
+  return (
+    <section className="mb-10">
+      <div className="mb-4 flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-display text-xl font-extrabold leading-tight md:text-2xl">{title}</h2>
+          {subtitle && <p className="truncate text-sm text-muted">{subtitle}</p>}
+        </div>
+        {viewAllHref && (
+          <Link
+            href={viewAllHref}
+            className="flex shrink-0 items-center gap-0.5 text-sm font-bold text-muted transition hover:text-accent"
+          >
+            Xem thêm
+            <ChevronRight size={16} />
+          </Link>
+        )}
+      </div>
+
+      <div className="relative">
+        <button
+          type="button"
+          aria-label="Cuộn sang trái"
+          tabIndex={edges.start ? -1 : 0}
+          onClick={() => scrollByPage(-1)}
+          className={`${arrowClass(edges.start)} left-1`}
+        >
+          <ChevronLeft size={22} />
+        </button>
+        <button
+          type="button"
+          aria-label="Cuộn sang phải"
+          tabIndex={edges.end ? -1 : 0}
+          onClick={() => scrollByPage(1)}
+          className={`${arrowClass(edges.end)} right-1`}
+        >
+          <ChevronRight size={22} />
+        </button>
+
+        <div
+          ref={scrollerRef}
+          onScroll={update}
+          className="no-scrollbar -mx-1 snap-x snap-proximity overflow-x-auto scroll-smooth px-1 pb-2"
+        >
+          <div ref={trackRef} className="flex w-max gap-4">
+            {children}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
