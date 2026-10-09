@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { LogOut } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
+import BackgroundPlayCard from "@/components/BackgroundPlayCard";
+import InstallCard from "@/components/InstallCard";
 import LoginButton from "@/components/LoginButton";
 import PageHeader from "@/components/PageHeader";
 import RequireAuth from "@/components/RequireAuth";
@@ -51,6 +53,10 @@ function SettingsContent() {
           </div>
         </div>
       </Card>
+
+      <InstallCard />
+
+      <BackgroundPlayCard />
 
       <Card title="Kết nối YouTube">
         <p className="mb-4 text-sm text-muted">

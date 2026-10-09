@@ -2,10 +2,20 @@
   "name": "SUS Music",
   "short_name": "SUS Music",
   "description": "Trình phát nhạc/video YouTube cá nhân, nghe nền trên PC và Android",
+  "id": "/",
+  "scope": "/",
+  "lang": "vi",
+  "categories": ["music", "entertainment"],
   "start_url": "/",
   "display": "standalone",
+  "display_override": ["standalone"],
   "background_color": "#1b000b",
   "theme_color": "#1b000b",
+  "shortcuts": [
+    { "name": "Tìm kiếm", "url": "/search", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Yêu thích", "url": "/favorites", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "Lịch sử", "url": "/history", "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
+  ],
   "icons": [
     { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },

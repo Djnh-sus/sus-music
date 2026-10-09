@@ -10,6 +10,8 @@ import {
   useState,
 } from "react";
 import { loadYouTubeIframeAPI } from "@/lib/youtube-iframe-loader";
+import { logBg } from "@/lib/bg-log";
+import { startKeepAlive, stopKeepAlive } from "@/lib/keepalive-audio";
 import { useAuth } from "@/context/AuthContext";
 import { loadPlayerState, savePlayerState } from "@/lib/player-storage";
 
@@ -60,7 +62,8 @@ const SKIP_NOTICE_MS = 6000;
 const REPEAT_MODES = ["off", "all", "one"];
 const PERSIST_DEBOUNCE_MS = 800;
 const PERSIST_INTERVAL_MS = 5000;
-const RESUME_WINDOW_MS = 2000;
+const RESUME_WINDOW_MS = 6000;
+const MAX_RESUME_ATTEMPTS = 3;
 const RESUME_STORAGE_KEY = "yt-player-resume-on-hide";
 const OWN_PAUSE_MARK_MS = 1500;
 
@@ -134,7 +137,7 @@ export function PlayerProvider({ children }) {
   const ownPauseRef = useRef(false);
   const ownPauseTimerRef = useRef(null);
   const hiddenSinceRef = useRef(0);
-  const resumeAttemptedRef = useRef(false);
+  const resumeAttemptsRef = useRef(0);
   const [resumeOnHide, setResumeOnHideState] = useState(readResumeSetting);
   const resumeOnHideRef = useRef(resumeOnHide);
   const userIdRef = useRef(null);
@@ -327,6 +330,9 @@ export function PlayerProvider({ children }) {
     const value = Boolean(enabled);
     resumeOnHideRef.current = value;
     setResumeOnHideState(value);
+    logBg("resumeOnHide", value ? "on" : "off");
+    if (!value) stopKeepAlive();
+    else if (playerRef.current?.getPlayerState?.() === 1) startKeepAlive();
     try {
       window.localStorage.setItem(RESUME_STORAGE_KEY, value ? "1" : "0");
     } catch {
@@ -654,15 +660,26 @@ export function PlayerProvider({ children }) {
 
   useEffect(() => {
     const onVisibility = () => {
+      logBg("visibility", document.visibilityState);
       if (document.visibilityState === "hidden") {
         hiddenSinceRef.current = Date.now();
       } else {
         hiddenSinceRef.current = 0;
-        resumeAttemptedRef.current = false;
+        resumeAttemptsRef.current = 0;
+        const state = playerRef.current?.getPlayerState?.();
+        if (state !== 1 && state !== 3) stopKeepAlive();
       }
     };
+    const onFreeze = () => logBg("page.freeze");
+    const onResume = () => logBg("page.resume");
     document.addEventListener("visibilitychange", onVisibility);
-    return () => document.removeEventListener("visibilitychange", onVisibility);
+    document.addEventListener("freeze", onFreeze);
+    document.addEventListener("resume", onResume);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("freeze", onFreeze);
+      document.removeEventListener("resume", onResume);
+    };
   }, []);
 
   useEffect(() => {
@@ -722,10 +739,12 @@ export function PlayerProvider({ children }) {
             setIsReady(true);
           },
           onStateChange: (event) => {
+            logBg("state", String(event.data));
             setIsPlaying(event.data === YT.PlayerState.PLAYING);
             if (event.data === YT.PlayerState.PLAYING) {
               errorStreakRef.current = 0;
               cuedPositionRef.current = null;
+              if (resumeOnHideRef.current) startKeepAlive();
             }
             if (event.data === YT.PlayerState.CUED) {
               setDuration(playerRef.current?.getDuration?.() || 0);
@@ -734,14 +753,16 @@ export function PlayerProvider({ children }) {
               const ownPause = ownPauseRef.current;
               ownPauseRef.current = false;
               const hiddenFor = hiddenSinceRef.current ? Date.now() - hiddenSinceRef.current : 0;
+              if (ownPause) stopKeepAlive();
               if (
                 !ownPause &&
                 resumeOnHideRef.current &&
-                !resumeAttemptedRef.current &&
+                resumeAttemptsRef.current < MAX_RESUME_ATTEMPTS &&
                 document.visibilityState === "hidden" &&
                 hiddenFor < RESUME_WINDOW_MS
               ) {
-                resumeAttemptedRef.current = true;
+                resumeAttemptsRef.current += 1;
+                logBg("resume.try", String(resumeAttemptsRef.current));
                 playerRef.current?.playVideo();
               }
             }
@@ -791,14 +812,25 @@ export function PlayerProvider({ children }) {
       });
     } else {
       navigator.mediaSession.metadata = null;
+      stopKeepAlive();
     }
 
     navigator.mediaSession.setActionHandler("play", () => {
+      logBg("mediasession", "play");
       playerRef.current?.playVideo();
     });
-    navigator.mediaSession.setActionHandler("pause", pausePlayer);
-    navigator.mediaSession.setActionHandler("nexttrack", playNext);
-    navigator.mediaSession.setActionHandler("previoustrack", playPrev);
+    navigator.mediaSession.setActionHandler("pause", () => {
+      logBg("mediasession", "pause");
+      pausePlayer();
+    });
+    navigator.mediaSession.setActionHandler("nexttrack", () => {
+      logBg("mediasession", "next");
+      playNext();
+    });
+    navigator.mediaSession.setActionHandler("previoustrack", () => {
+      logBg("mediasession", "previous");
+      playPrev();
+    });
   }, [currentTrack, playNext, playPrev, pausePlayer]);
 
   useEffect(() => {

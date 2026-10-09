@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogOut, Settings } from "lucide-react";
+import { Download, LogOut, Settings } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/context/AuthContext";
+import { usePwaInstall } from "@/lib/pwa-install";
 
 export default function AccountMenu() {
   const { user } = useAuth();
+  const { canPrompt, isIOS, isStandalone, install } = usePwaInstall();
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
   const router = useRouter();
@@ -39,6 +41,14 @@ export default function AccountMenu() {
   const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture;
   const displayName = user.user_metadata?.full_name || user.user_metadata?.name || user.email;
   const initial = displayName?.[0]?.toUpperCase() || "?";
+
+  const showInstall = !isStandalone && (canPrompt || isIOS);
+
+  const handleInstall = async () => {
+    setOpen(false);
+    if (canPrompt) await install();
+    else router.push("/settings");
+  };
 
   const handleLogout = async () => {
     setOpen(false);
@@ -88,6 +98,17 @@ export default function AccountMenu() {
             <Settings size={17} className="text-muted" />
             Cài đặt tài khoản
           </Link>
+          {showInstall && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={handleInstall}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition hover:bg-white/8"
+            >
+              <Download size={17} className="text-muted" />
+              Cài ứng dụng
+            </button>
+          )}
           <button
             type="button"
             role="menuitem"
