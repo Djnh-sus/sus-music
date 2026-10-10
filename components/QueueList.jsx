@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect } from "react";
-import { ArrowDown, ArrowUp, GripVertical, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowDown, ArrowUp, GripVertical, Trash2, X } from "lucide-react";
 import { usePlayer } from "@/context/PlayerContext";
 import { useDragReorder } from "@/lib/use-drag-reorder";
 import { formatDuration } from "@/lib/duration";
 import TrackMenu from "@/components/TrackMenu";
 import Equalizer from "@/components/Equalizer";
+
+const INITIAL_ROWS = 14;
+const FULL_RENDER_DELAY_MS = 450;
 
 export default function QueueList({ scroll = false }) {
   const {
@@ -20,6 +23,12 @@ export default function QueueList({ scroll = false }) {
   } = usePlayer();
 
   const { listRef, drag, getHandleProps } = useDragReorder({ onMove: moveInQueue });
+  const [fullRender, setFullRender] = useState(false);
+
+  useEffect(() => {
+    const id = setTimeout(() => setFullRender(true), FULL_RENDER_DELAY_MS);
+    return () => clearTimeout(id);
+  }, []);
 
   useEffect(() => {
     if (!scroll) return;
@@ -29,6 +38,7 @@ export default function QueueList({ scroll = false }) {
 
   if (queue.length === 0) return null;
 
+  const rowLimit = fullRender ? queue.length : Math.max(INITIAL_ROWS, currentIndex + 8);
   const hasUpcoming = currentIndex >= 0 && currentIndex < queue.length - 1;
 
   const dragClass = (index) => {
@@ -43,31 +53,30 @@ export default function QueueList({ scroll = false }) {
   };
 
   return (
-    <section
-      aria-label="Hàng đợi"
-      className={`flex flex-col ${scroll ? "h-full min-h-0" : ""}`}
-    >
-      <div className="flex shrink-0 items-center justify-between gap-2 px-4 pb-2 pt-4 md:pt-5">
+    <section aria-label="Hàng đợi" className={`flex flex-col ${scroll ? "h-full min-h-0" : ""}`}>
+      <div className="flex shrink-0 items-center justify-between gap-2 px-5 pb-2 pt-4">
         <h2 className="font-display text-lg font-bold">
-          Tiếp theo <span className="text-sm font-semibold text-muted">· {queue.length} bài</span>
+          Hàng đợi <span className="text-sm font-semibold text-muted">· {queue.length} bài</span>
         </h2>
         {hasUpcoming && (
           <button
             type="button"
             onClick={clearUpcoming}
-            className="text-xs font-semibold text-muted transition hover:text-foreground"
+            className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-muted transition hover:bg-white/10 hover:text-foreground"
           >
-            Xoá các bài phía sau
+            <Trash2 size={13} />
+            Xoá phía sau
           </button>
         )}
       </div>
 
       <ul
         ref={listRef}
-        className={`flex flex-col gap-0.5 px-2 pb-3 ${scroll ? "min-h-0 flex-1 overflow-y-auto" : ""}`}
+        className={`flex flex-col gap-0.5 px-2 pb-3 ${scroll ? "np-scroll min-h-0 flex-1" : ""}`}
       >
-        {queue.map((track, index) => {
+        {queue.slice(0, rowLimit).map((track, index) => {
           const isCurrent = index === currentIndex;
+          const isPast = index < currentIndex;
           const durationLabel = track.durationSeconds ? formatDuration(track.durationSeconds) : "";
           const extraItems = [
             ...(index > 0
@@ -84,17 +93,23 @@ export default function QueueList({ scroll = false }) {
           return (
             <li
               key={track.queueId}
-              className={`flex items-center gap-1 rounded-xl px-1 py-1.5 transition-colors ${
-                isCurrent ? "bg-surface" : "hover:bg-white/5"
-              }${dragClass(index)}`}
+              className={`group row-lazy relative flex items-center gap-1 rounded-2xl py-1.5 pl-1 pr-1 transition-colors ${
+                isCurrent ? "bg-surface-2" : "hover:bg-white/5"
+              }${isPast ? " opacity-60" : ""}${dragClass(index)}`}
             >
+              {isCurrent && (
+                <span
+                  aria-hidden="true"
+                  className="absolute bottom-2.5 left-0 top-2.5 w-1 rounded-full bg-accent"
+                />
+              )}
               <span
                 role="button"
                 aria-label="Kéo để sắp xếp"
-                className="flex h-9 w-6 shrink-0 items-center justify-center text-muted opacity-50 transition hover:opacity-100"
+                className="flex h-9 w-5 shrink-0 items-center justify-center text-muted opacity-0 transition group-hover:opacity-100 [@media(hover:none)]:opacity-60"
                 {...getHandleProps(index)}
               >
-                <GripVertical size={16} />
+                <GripVertical size={15} />
               </span>
 
               <button
@@ -103,7 +118,7 @@ export default function QueueList({ scroll = false }) {
                 aria-current={isCurrent ? "true" : undefined}
                 className="flex min-w-0 flex-1 items-center gap-3 text-left"
               >
-                <span className="relative aspect-video w-20 shrink-0 overflow-hidden rounded-lg bg-surface-2">
+                <span className="relative aspect-square w-11 shrink-0 overflow-hidden rounded-xl bg-surface">
                   {track.thumbnail ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={track.thumbnail} alt="" className="h-full w-full object-cover" />
@@ -116,7 +131,7 @@ export default function QueueList({ scroll = false }) {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span
-                    className={`block truncate text-sm font-semibold ${isCurrent ? "text-accent" : ""}`}
+                    className={`block truncate text-sm font-bold ${isCurrent ? "text-accent" : ""}`}
                   >
                     {track.title}
                   </span>
@@ -127,7 +142,7 @@ export default function QueueList({ scroll = false }) {
                 )}
               </button>
 
-              <TrackMenu track={track} extraItems={extraItems} className="shrink-0" />
+              <TrackMenu track={track} extraItems={extraItems} className="card-menu shrink-0" />
             </li>
           );
         })}

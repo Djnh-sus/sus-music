@@ -8,6 +8,8 @@ export default function Shelf({ title, subtitle, viewAllHref, children }) {
   const scrollerRef = useRef(null);
   const trackRef = useRef(null);
   const [edges, setEdges] = useState({ start: true, end: true });
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef({ active: false, moved: false, startX: 0, startLeft: 0, id: 0 });
 
   const update = useCallback(() => {
     const el = scrollerRef.current;
@@ -31,6 +33,50 @@ export default function Shelf({ title, subtitle, viewAllHref, children }) {
     observer.observe(track);
     return () => observer.disconnect();
   }, [update]);
+
+  const handlePointerDown = (e) => {
+    if (e.pointerType !== "mouse" || e.button !== 0) return;
+    dragRef.current = {
+      active: true,
+      moved: false,
+      startX: e.clientX,
+      startLeft: scrollerRef.current.scrollLeft,
+      id: e.pointerId,
+    };
+  };
+
+  const handlePointerMove = (e) => {
+    const drag = dragRef.current;
+    const el = scrollerRef.current;
+    if (!drag.active || !el) return;
+    const dx = e.clientX - drag.startX;
+    if (!drag.moved && Math.abs(dx) > 6) {
+      drag.moved = true;
+      setDragging(true);
+      el.setPointerCapture(drag.id);
+    }
+    if (drag.moved) el.scrollLeft = drag.startLeft - dx;
+  };
+
+  const handlePointerEnd = () => {
+    const drag = dragRef.current;
+    if (!drag.active) return;
+    drag.active = false;
+    if (drag.moved) {
+      setDragging(false);
+      try {
+        scrollerRef.current.releasePointerCapture(drag.id);
+      } catch {
+      }
+    }
+  };
+
+  const handleClickCapture = (e) => {
+    if (!dragRef.current.moved) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragRef.current.moved = false;
+  };
 
   const scrollByPage = (direction) => {
     const el = scrollerRef.current;
@@ -84,7 +130,14 @@ export default function Shelf({ title, subtitle, viewAllHref, children }) {
         <div
           ref={scrollerRef}
           onScroll={update}
-          className="no-scrollbar -mx-1 snap-x snap-proximity overflow-x-auto scroll-smooth px-1 pb-2"
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerEnd}
+          onPointerCancel={handlePointerEnd}
+          onClickCapture={handleClickCapture}
+          data-dragging={dragging}
+          style={dragging ? { scrollSnapType: "none", scrollBehavior: "auto" } : undefined}
+          className="shelf-scroll no-scrollbar -mx-1 snap-x snap-proximity overflow-x-auto scroll-smooth px-1 pb-2"
         >
           <div ref={trackRef} className="flex w-max gap-4">
             {children}

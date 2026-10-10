@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import { ChevronUp, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { usePlayer, usePlayerTime } from "@/context/PlayerContext";
 import FavoriteButton from "@/components/FavoriteButton";
@@ -37,18 +38,59 @@ export default function PlayerBar() {
     miniThumbRef,
   } = usePlayer();
 
+  const swipeRef = useRef(null);
+  const suppressClickRef = useRef(false);
+
   if (!currentTrack) return null;
 
   const toggleExpanded = () => (isNowPlayingOpen ? closeNowPlaying() : openNowPlaying());
 
+  const activate = () => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    toggleExpanded();
+  };
+
+  const handleBarClick = (e) => {
+    if (e.target.closest("button, a, input, select, textarea, [role='slider']")) return;
+    activate();
+  };
+
+  const handlePointerDown = (e) => {
+    if (e.pointerType !== "touch") return;
+    swipeRef.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const handlePointerUp = (e) => {
+    const start = swipeRef.current;
+    swipeRef.current = null;
+    if (!start || e.pointerType !== "touch") return;
+    const dy = e.clientY - start.y;
+    const dx = e.clientX - start.x;
+    if (dy < -36 && Math.abs(dx) < 60 && !isNowPlayingOpen) {
+      suppressClickRef.current = true;
+      setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 350);
+      openNowPlaying();
+    }
+  };
+
   return (
-    <div className="player-bar bar-in">
+    <div
+      className="player-bar bar-in"
+      onClick={handleBarClick}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+    >
       <MiniProgress />
 
       <div className="flex h-full items-center gap-2 px-3 md:gap-4 md:px-5">
         <button
           type="button"
-          onClick={toggleExpanded}
+          onClick={activate}
           aria-label={isNowPlayingOpen ? "Thu nhỏ trình phát" : "Mở trình phát"}
           className="flex min-w-0 flex-1 items-center gap-3 text-left md:w-64 md:flex-none xl:w-72"
         >
