@@ -64,12 +64,6 @@ export default function BackgroundPlayCard() {
       </ul>
 
       <p className="mb-3 text-sm text-muted">
-        Trên Android: cài app ra màn hình chính, rồi vào Cài đặt &gt; Ứng dụng &gt; tên app &gt; Pin và
-        chọn “Không hạn chế”. Việc này giúp hệ điều hành ít tắt app đang chạy ngầm hơn, nhưng không ngăn
-        được YouTube tự dừng video. iOS không có tuỳ chọn tương đương.
-      </p>
-
-      <p className="mb-3 text-sm text-muted">
         Cách thử: bật tuỳ chọn, phát một bài, tắt màn hình khoảng 30 giây, mở lại rồi bấm “Làm mới”.
         Gửi nhật ký bên dưới để biết máy của bạn xử lý ra sao.
       </p>

@@ -119,6 +119,7 @@ export async function GET(request) {
       videoId: item.id.videoId,
       title: decodeHtmlEntities(item.snippet?.title),
       channelTitle: decodeHtmlEntities(item.snippet?.channelTitle),
+      channelId: item.snippet?.channelId || "",
       thumbnail: item.snippet?.thumbnails?.medium?.url || item.snippet?.thumbnails?.default?.url,
       durationSeconds: seconds > 0 ? seconds : null,
       isLive: item.snippet?.liveBroadcastContent === "live",

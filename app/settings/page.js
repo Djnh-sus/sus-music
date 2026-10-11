@@ -60,8 +60,9 @@ function SettingsContent() {
 
       <Card title="Kết nối YouTube">
         <p className="mb-4 text-sm text-muted">
-          SUS Music dùng quyền chỉ đọc để lấy danh sách playlist trên YouTube của bạn. Nếu playlist
-          không tải được hoặc quyền đã hết hạn, hãy kết nối lại.
+          SUS Music dùng quyền quản lý YouTube để đọc playlist và chỉ đăng ký hoặc huỷ đăng ký kênh
+          khi bạn bấm nút Theo dõi. Nếu playlist không tải được, nút Theo dõi báo thiếu quyền hoặc
+          quyền đã hết hạn, hãy kết nối lại.
         </p>
         <LoginButton label="Kết nối lại YouTube" />
       </Card>

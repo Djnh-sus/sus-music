@@ -24,6 +24,8 @@ export default function PlaybackOptions() {
     repeat,
     sleepTimer,
     resumeOnHide,
+    autoplay,
+    setAutoplay,
     toggleShuffle,
     cycleRepeat,
     setSleepTimer,
@@ -85,6 +87,16 @@ export default function PlaybackOptions() {
       </div>
 
       <VolumeControl className="2xl:hidden" sliderClassName="min-w-0 flex-1" />
+
+      <label className="flex items-start gap-3 text-sm text-muted">
+        <input
+          type="checkbox"
+          checked={autoplay}
+          onChange={(e) => setAutoplay(e.target.checked)}
+          className="mt-1 h-4 w-4 accent-[var(--accent)]"
+        />
+        <span>Tự động phát bài gợi ý khi hết hàng đợi</span>
+      </label>
 
       <label className="flex items-start gap-3 text-sm text-muted">
         <input

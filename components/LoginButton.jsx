@@ -11,7 +11,7 @@ export default function LoginButton({ label = "Đăng nhập bằng Google", cla
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        scopes: "https://www.googleapis.com/auth/youtube.readonly",
+        scopes: "https://www.googleapis.com/auth/youtube.force-ssl",
         queryParams: {
           access_type: "offline",
           prompt: "consent",

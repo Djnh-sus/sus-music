@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, GripVertical, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, GripVertical, ListPlus, Trash2, X } from "lucide-react";
+import { supabase } from "@/lib/supabase/client";
+import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/context/ToastContext";
+import { notifyPlaylistsChanged } from "@/lib/playlist-events";
+import { trackToRow } from "@/lib/track";
 import { usePlayer } from "@/context/PlayerContext";
 import { useDragReorder } from "@/lib/use-drag-reorder";
 import { formatDuration } from "@/lib/duration";
@@ -24,6 +29,9 @@ export default function QueueList({ scroll = false }) {
 
   const { listRef, drag, getHandleProps } = useDragReorder({ onMove: moveInQueue });
   const [fullRender, setFullRender] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const { userId } = useAuth();
+  const { showToast } = useToast();
 
   useEffect(() => {
     const id = setTimeout(() => setFullRender(true), FULL_RENDER_DELAY_MS);
@@ -37,6 +45,46 @@ export default function QueueList({ scroll = false }) {
   }, [scroll, currentIndex, listRef]);
 
   if (queue.length === 0) return null;
+
+  const handleSave = async () => {
+    if (saving || !userId) return;
+    setSaving(true);
+    try {
+      const name = `Hàng đợi ${new Date().toLocaleString("vi-VN", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })}`;
+      const { data: created, error } = await supabase
+        .from("custom_playlists")
+        .insert({ user_id: userId, name })
+        .select("id")
+        .single();
+      if (error) throw new Error(error.message);
+
+      for (let start = 0; start < queue.length; start += 100) {
+        const chunk = queue.slice(start, start + 100).map((track, offset) => ({
+          playlist_id: created.id,
+          ...trackToRow(track),
+          position: start + offset,
+        }));
+        const { error: chunkError } = await supabase.from("playlist_tracks").insert(chunk);
+        if (chunkError) {
+          await supabase.from("custom_playlists").delete().eq("id", created.id);
+          throw new Error(chunkError.message);
+        }
+      }
+
+      notifyPlaylistsChanged();
+      showToast(`Đã lưu thành playlist “${name}”`);
+    } catch (err) {
+      showToast(`Không lưu được playlist: ${err.message}`, { type: "error" });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const rowLimit = fullRender ? queue.length : Math.max(INITIAL_ROWS, currentIndex + 8);
   const hasUpcoming = currentIndex >= 0 && currentIndex < queue.length - 1;
@@ -55,19 +103,31 @@ export default function QueueList({ scroll = false }) {
   return (
     <section aria-label="Hàng đợi" className={`flex flex-col ${scroll ? "h-full min-h-0" : ""}`}>
       <div className="flex shrink-0 items-center justify-between gap-2 px-5 pb-2 pt-4">
-        <h2 className="font-display text-lg font-bold">
+        <h2 className="whitespace-nowrap font-display text-lg font-bold">
           Hàng đợi <span className="text-sm font-semibold text-muted">· {queue.length} bài</span>
         </h2>
-        {hasUpcoming && (
+        <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={clearUpcoming}
-            className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold text-muted transition hover:bg-white/10 hover:text-foreground"
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold text-muted transition hover:bg-white/10 hover:text-foreground disabled:opacity-50"
           >
-            <Trash2 size={13} />
-            Xoá phía sau
+            <ListPlus size={13} />
+            {saving ? "Đang lưu..." : "Lưu playlist"}
           </button>
-        )}
+          {hasUpcoming && (
+            <button
+              type="button"
+              onClick={clearUpcoming}
+              title="Xoá các bài phía sau"
+              aria-label="Xoá các bài phía sau"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition hover:bg-white/10 hover:text-foreground"
+            >
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
       </div>
 
       <ul
@@ -77,6 +137,7 @@ export default function QueueList({ scroll = false }) {
         {queue.slice(0, rowLimit).map((track, index) => {
           const isCurrent = index === currentIndex;
           const isPast = index < currentIndex;
+          const isFirstRadio = track.origin === "radio" && queue[index - 1]?.origin !== "radio";
           const durationLabel = track.durationSeconds ? formatDuration(track.durationSeconds) : "";
           const extraItems = [
             ...(index > 0
@@ -93,10 +154,15 @@ export default function QueueList({ scroll = false }) {
           return (
             <li
               key={track.queueId}
-              className={`group row-lazy relative flex items-center gap-1 rounded-2xl py-1.5 pl-1 pr-1 transition-colors ${
-                isCurrent ? "bg-surface-2" : "hover:bg-white/5"
-              }${isPast ? " opacity-60" : ""}${dragClass(index)}`}
+              className={`group row-lazy relative flex items-center gap-1 rounded-2xl pb-1.5 pl-1 pr-1 transition-colors ${
+                isFirstRadio ? "pt-7" : "pt-1.5"
+              } ${isCurrent ? "bg-surface-2" : "hover:bg-white/5"}${isPast ? " opacity-60" : ""}${dragClass(index)}`}
             >
+              {isFirstRadio && (
+                <span className="absolute left-3 top-2 text-[11px] font-bold text-muted">
+                  Tự động phát tiếp
+                </span>
+              )}
               {isCurrent && (
                 <span
                   aria-hidden="true"

@@ -4,6 +4,7 @@ import { ToastProvider } from "@/context/ToastContext";
 import { PlayerProvider } from "@/context/PlayerContext";
 import PlayerBar from "@/components/PlayerBar";
 import Sidebar from "@/components/Sidebar";
+import PlayerSync from "@/components/PlayerSync";
 import TopBar from "@/components/TopBar";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import HistoryLogger from "@/components/HistoryLogger";
@@ -62,6 +63,7 @@ export default function RootLayout({ children }) {
               <PlayerBar />
               <PlayerLoadErrorBanner />
               <NowPlaying />
+              <PlayerSync />
               <HistoryLogger />
               <KeyboardShortcuts />
             </PlayerProvider>

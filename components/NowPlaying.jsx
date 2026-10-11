@@ -6,6 +6,7 @@ import { ChevronDown, Pause, Play, Share2, SkipBack, SkipForward } from "lucide-
 import { usePlayer } from "@/context/PlayerContext";
 import { useToast } from "@/context/ToastContext";
 import FavoriteButton from "@/components/FavoriteButton";
+import FollowButton from "@/components/FollowButton";
 import PlaybackOptions from "@/components/PlaybackOptions";
 import ProgressBar from "@/components/ProgressBar";
 import QueueList from "@/components/QueueList";
@@ -326,7 +327,10 @@ export default function NowPlaying() {
                   <h2 className="font-display text-2xl font-extrabold leading-tight md:text-3xl">
                     {shownTrack.title}
                   </h2>
-                  <p className="mt-1 text-base font-semibold text-visor">{shownTrack.channelTitle}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-3">
+                    <p className="text-base font-semibold text-visor">{shownTrack.channelTitle}</p>
+                    <FollowButton track={shownTrack} />
+                  </div>
                 </div>
 
                 <div className="rise flex items-center gap-1" style={{ "--d": "120ms" }}>

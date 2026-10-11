@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CircleAlert, Play, Search, SearchX } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
 import PageHeader from "@/components/PageHeader";
@@ -12,12 +12,14 @@ import { useAuth } from "@/context/AuthContext";
 import { usePlayer } from "@/context/PlayerContext";
 import { useToast } from "@/context/ToastContext";
 import { authedFetch } from "@/lib/authed-fetch";
+import { pickTopicChips } from "@/lib/music-query";
 
 function SearchResults() {
   const params = useSearchParams();
   const q = (params.get("q") || "").trim();
+  const router = useRouter();
   const { userId } = useAuth();
-  const { playQueue, addToQueue } = usePlayer();
+  const { playQueue, playTrackWithRadio, addToQueue } = usePlayer();
   const { showToast } = useToast();
   const [state, setState] = useState({ q: null, status: "idle", items: [], error: null });
   const [attempt, setAttempt] = useState(0);
@@ -50,6 +52,9 @@ function SearchResults() {
   const current =
     state.q === q ? state : { status: q ? "loading" : "idle", items: [], error: null };
 
+  const chips =
+    current.status === "ready" ? pickTopicChips(current.items.map((item) => item.title), q) : [];
+
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-6 md:px-8">
       <PageHeader
@@ -63,6 +68,21 @@ function SearchResults() {
           </button>
         )}
       </PageHeader>
+
+      {chips.length > 0 && (
+        <div className="mb-4 flex flex-wrap gap-2" aria-label="Chủ đề liên quan">
+          {chips.map((chip) => (
+            <button
+              key={chip}
+              type="button"
+              onClick={() => router.push(`/search?q=${encodeURIComponent(`${q} ${chip}`)}`)}
+              className="btn-ghost py-1 text-sm"
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
+      )}
 
       {current.status === "idle" && (
         <EmptyState
@@ -92,11 +112,11 @@ function SearchResults() {
 
       {current.status === "ready" && current.items.length > 0 && (
         <ul className="flex flex-col gap-1">
-          {current.items.map((track, index) => (
+          {current.items.map((track) => (
             <TrackResultItem
               key={track.videoId}
               track={track}
-              onPlay={() => playQueue(current.items, index)}
+              onPlay={() => playTrackWithRadio(track)}
               onAddToQueue={() => {
                 addToQueue(track);
                 showToast("Đã thêm vào hàng chờ");

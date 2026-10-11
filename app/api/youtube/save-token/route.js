@@ -1,4 +1,5 @@
 import { createAdminClient, getUserFromRequest } from "@/lib/supabase/admin";
+import { encryptToken } from "@/lib/token-crypto";
 
 export async function POST(request) {
   const admin = createAdminClient();
@@ -17,7 +18,7 @@ export async function POST(request) {
 
   const { error } = await admin.from("google_tokens").upsert({
     user_id: user.id,
-    provider_refresh_token: refreshToken,
+    provider_refresh_token: encryptToken(refreshToken),
     updated_at: new Date().toISOString(),
   });
 

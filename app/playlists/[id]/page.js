@@ -6,10 +6,12 @@ import {
   ArrowDown,
   ArrowUp,
   GripVertical,
+  Link2,
   ListMusic,
   Pencil,
   Play,
   Plus,
+  Share2,
   Trash2,
   X,
 } from "lucide-react";
@@ -22,6 +24,7 @@ import TrackMenu from "@/components/TrackMenu";
 import { usePlayer } from "@/context/PlayerContext";
 import { useToast } from "@/context/ToastContext";
 import { trackFromRow } from "@/lib/track";
+import { copyText } from "@/lib/clipboard";
 import { authedFetch } from "@/lib/authed-fetch";
 import { notifyPlaylistsChanged } from "@/lib/playlist-events";
 import { addTrackToPlaylist } from "@/lib/playlist-ops";
@@ -42,6 +45,7 @@ function PlaylistDetailContent() {
   const [renaming, setRenaming] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [shareToken, setShareToken] = useState(null);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchError, setSearchError] = useState(null);
@@ -57,6 +61,37 @@ function PlaylistDetailContent() {
     setPlaylist(data);
   };
 
+  const loadShareToken = async () => {
+    const { data } = await supabase.from("custom_playlists").select("share_token").eq("id", id).single();
+    setShareToken(data?.share_token || null);
+  };
+
+  const shareLink = (token) => `${window.location.origin}/p/${token}`;
+
+  const handleShare = async () => {
+    const token = shareToken || crypto.randomUUID().replaceAll("-", "");
+    if (!shareToken) {
+      const { error } = await supabase.from("custom_playlists").update({ share_token: token }).eq("id", id);
+      if (error) {
+        showToast(`Không bật được chia sẻ: ${error.message}`, { type: "error" });
+        return;
+      }
+      setShareToken(token);
+    }
+    const ok = await copyText(shareLink(token));
+    showToast(ok ? "Đã sao chép liên kết chia sẻ" : "Đã bật chia sẻ, nhưng chưa sao chép được liên kết");
+  };
+
+  const handleStopSharing = async () => {
+    const { error } = await supabase.from("custom_playlists").update({ share_token: null }).eq("id", id);
+    if (error) {
+      showToast(`Không tắt được chia sẻ: ${error.message}`, { type: "error" });
+      return;
+    }
+    setShareToken(null);
+    showToast("Đã tắt chia sẻ, liên kết cũ không còn dùng được");
+  };
+
   const loadTracks = async () => {
     const { data } = await supabase
       .from("playlist_tracks")
@@ -70,6 +105,7 @@ function PlaylistDetailContent() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPlaylist();
+    loadShareToken();
     loadTracks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -214,6 +250,24 @@ function PlaylistDetailContent() {
               <button type="button" onClick={() => playFrom(0)} className="btn-primary mr-1">
                 <Play size={18} fill="currentColor" />
                 Phát tất cả
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleShare}
+              aria-label={shareToken ? "Sao chép liên kết chia sẻ" : "Chia sẻ playlist"}
+              className="icon-btn"
+              data-active={Boolean(shareToken)}
+            >
+              {shareToken ? <Link2 size={18} /> : <Share2 size={18} />}
+            </button>
+            {shareToken && (
+              <button
+                type="button"
+                onClick={handleStopSharing}
+                className="rounded-full px-2.5 py-1 text-xs font-semibold text-muted transition hover:bg-white/10 hover:text-foreground"
+              >
+                Tắt chia sẻ
               </button>
             )}
             <button

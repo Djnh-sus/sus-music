@@ -8,22 +8,29 @@ import EmptyState from "@/components/EmptyState";
 import LoginButton from "@/components/LoginButton";
 import Logo from "@/components/Logo";
 import PlaylistCard from "@/components/PlaylistCard";
+import ResumeCard from "@/components/ResumeCard";
 import Shelf from "@/components/Shelf";
 import { PageSkeleton, ShelfSkeleton } from "@/components/Skeleton";
 import TrackCard from "@/components/TrackCard";
 import { usePlayer } from "@/context/PlayerContext";
 import { useAuth } from "@/context/AuthContext";
-import { topChannels, useRecommendation } from "@/lib/recommendations";
+import {
+  cleanItems,
+  topChannels,
+  useRecommendation,
+  useSubscriptionFeed,
+} from "@/lib/recommendations";
 import { loadSearchHistory } from "@/lib/search-history";
 import { trackFromRow, uniqueByVideoId } from "@/lib/track";
 
 const PAGE_CLASS = "mx-auto w-full max-w-6xl px-4 py-6 md:px-8";
 
-function RecommendationShelf({ title, subtitle, state, onPlay }) {
+function RecommendationShelf({ title, subtitle, state, onPlay, quiet = false }) {
   if (state.status === "idle") return null;
   if (state.status === "loading") return <ShelfSkeleton />;
 
   if (state.status === "error") {
+    if (quiet) return null;
     return (
       <section className="mb-10">
         <h2 className="font-display text-xl font-extrabold md:text-2xl">{title}</h2>
@@ -58,7 +65,7 @@ function RecommendationShelf({ title, subtitle, state, onPlay }) {
 function HomeContent() {
   const { user, userId, loading } = useAuth();
   const [dashboard, setDashboard] = useState(null);
-  const { playQueue } = usePlayer();
+  const { playQueue, playTrackWithRadio } = usePlayer();
   const searchParams = useSearchParams();
   const loginError = searchParams.get("login_error");
 
@@ -123,6 +130,14 @@ function HomeContent() {
 
   const suggestState = useRecommendation(shown ? userId : null, suggestQuery);
   const recommendState = useRecommendation(shown ? userId : null, recommendQuery);
+  const feedState = useSubscriptionFeed(shown ? userId : null);
+
+  const recentIds = new Set(recentHistory.map((h) => h.video_id));
+  const suggestItems = cleanItems(suggestState.items, recentIds);
+  const usedIds = new Set([...recentIds, ...suggestItems.map((item) => item.videoId)]);
+  const recommendItems = cleanItems(recommendState.items, usedIds);
+  const allUsedIds = new Set([...usedIds, ...recommendItems.map((item) => item.videoId)]);
+  const feedItems = cleanItems(feedState.items, allUsedIds);
 
   if (loading) return <PageSkeleton />;
 
@@ -182,18 +197,28 @@ function HomeContent() {
         </EmptyState>
       )}
 
+      <ResumeCard userId={userId} />
+
       <RecommendationShelf
         title="Gợi ý"
         subtitle={suggestNote}
-        state={suggestState}
-        onPlay={playQueue}
+        state={{ ...suggestState, items: suggestItems }}
+        onPlay={(items, index) => playTrackWithRadio(items[index])}
+      />
+
+      <RecommendationShelf
+        title="Mới từ kênh bạn đăng ký"
+        subtitle="Video mới nhất từ tài khoản YouTube của bạn"
+        state={{ ...feedState, items: feedItems }}
+        onPlay={(items, index) => playTrackWithRadio(items[index])}
+        quiet
       />
 
       <RecommendationShelf
         title="Đề xuất"
         subtitle={recommendNote}
-        state={recommendState}
-        onPlay={playQueue}
+        state={{ ...recommendState, items: recommendItems }}
+        onPlay={(items, index) => playTrackWithRadio(items[index])}
       />
 
       {recentHistory.length > 0 && (

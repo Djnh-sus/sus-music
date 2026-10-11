@@ -11,6 +11,7 @@ import {
 } from "react";
 import { loadYouTubeIframeAPI } from "@/lib/youtube-iframe-loader";
 import { logBg } from "@/lib/bg-log";
+import { authedFetch } from "@/lib/authed-fetch";
 import { startKeepAlive, stopKeepAlive } from "@/lib/keepalive-audio";
 import { useAuth } from "@/context/AuthContext";
 import { loadPlayerState, savePlayerState } from "@/lib/player-storage";
@@ -22,41 +23,6 @@ const RESTART_THRESHOLD_SECONDS = 3;
 const SEEK_STEP_SECONDS = 10;
 const SEEK_HOLD_MS = 800;
 
-const CONTAINER_CLOSED_STYLE = {
-  position: "fixed",
-  bottom: 0,
-  left: 0,
-  width: 0,
-  height: 0,
-  overflow: "hidden",
-};
-
-function frameStyle(frame) {
-  return {
-    position: "fixed",
-    top: frame.top,
-    left: frame.left,
-    width: frame.width,
-    height: frame.height,
-    zIndex: 55,
-    overflow: "hidden",
-    borderRadius: 16,
-    background: "#000",
-    boxShadow: "0 20px 50px -14px rgba(0, 0, 0, 0.65)",
-  };
-}
-
-function sameFrame(a, b) {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  return (
-    Math.abs(a.top - b.top) < 0.5 &&
-    Math.abs(a.left - b.left) < 0.5 &&
-    Math.abs(a.width - b.width) < 0.5 &&
-    Math.abs(a.height - b.height) < 0.5
-  );
-}
-
 const MAX_CONSECUTIVE_ERRORS = 5;
 const SKIP_NOTICE_MS = 6000;
 const REPEAT_MODES = ["off", "all", "one"];
@@ -66,19 +32,16 @@ const RESUME_WINDOW_MS = 6000;
 const MAX_RESUME_ATTEMPTS = 3;
 const RESUME_STORAGE_KEY = "yt-player-resume-on-hide";
 const OWN_PAUSE_MARK_MS = 1500;
-// Trình duyệt đôi khi pause video NGAY TRƯỚC khi bắn visibilitychange -> hidden.
-// Pause nào nằm trong khoảng này trước lúc ẩn tab được coi là do trình duyệt, không phải người dùng.
-const HIDE_PAUSE_GRACE_MS = 1000;
+const AUTOPLAY_STORAGE_KEY = "yt-autoplay";
+const RADIO_BATCH = 20;
+const ALTERNATE_CODES = [100, 101, 150];
 
-// Giá trị của YT.PlayerState (dùng ngoài chỗ có sẵn biến YT)
-const YT_STATE = { PLAYING: 1, PAUSED: 2, BUFFERING: 3 };
-
-// Gọi setActionHandler có bọc try/catch: một số trình duyệt ném lỗi với action họ không hỗ trợ
-function setMediaAction(action, handler) {
+function readAutoplaySetting() {
+  if (typeof window === "undefined") return true;
   try {
-    navigator.mediaSession.setActionHandler(action, handler);
+    return window.localStorage.getItem(AUTOPLAY_STORAGE_KEY) !== "0";
   } catch {
-    // action không được hỗ trợ -> bỏ qua
+    return true;
   }
 }
 
@@ -97,7 +60,6 @@ const PLAYER_ERROR_REASONS = {
   100: "Video đã bị xoá hoặc để riêng tư",
   101: "Chủ video không cho phát ở trang web khác",
   150: "Chủ video không cho phát ở trang web khác",
-  audio: "Không phát được luồng âm thanh nền",
 };
 
 function shuffleArray(items) {
@@ -116,12 +78,6 @@ function restoreOriginalOrder(queue, originalIds) {
     .sort((a, b) => position.get(a.queueId) - position.get(b.queueId));
   const added = queue.filter((entry) => !position.has(entry.queueId));
   return [...known, ...added];
-}
-
-// Bài "đang/sắp phát": bài đang phát (currentIndex) hoặc bài đang chờ API sẵn sàng (pendingIndex).
-// Lấy max để cả hai cùng được giữ nguyên chỗ khi sắp xếp lại hàng đợi.
-function anchorIndex(currentIdx, pendingIdx) {
-  return Math.max(currentIdx, pendingIdx ?? -1);
 }
 
 export function PlayerProvider({ children }) {
@@ -144,7 +100,6 @@ export function PlayerProvider({ children }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [isNowPlayingOpen, setNowPlayingOpen] = useState(false);
-  const [videoFrame, setVideoFrameState] = useState(null);
   const seekHoldUntilRef = useRef(0);
 
   const [shuffle, setShuffle] = useState(false);
@@ -162,6 +117,11 @@ export function PlayerProvider({ children }) {
   const resumeAttemptsRef = useRef(0);
   const [resumeOnHide, setResumeOnHideState] = useState(readResumeSetting);
   const resumeOnHideRef = useRef(resumeOnHide);
+  const [autoplay, setAutoplayState] = useState(readAutoplaySetting);
+  const autoplayRef = useRef(autoplay);
+  const radioSeqRef = useRef(0);
+  const radioBusyRef = useRef(false);
+  const startAtRef = useRef(null);
   const userIdRef = useRef(null);
   const restoreDoneRef = useRef(null);
   const pendingCueRef = useRef(null);
@@ -172,13 +132,6 @@ export function PlayerProvider({ children }) {
   const [playbackError, setPlaybackError] = useState(null);
   const errorStreakRef = useRef(0);
   const errorTimerRef = useRef(null);
-
-  // Phát nền / lưu trạng thái
-  const lastPersistAtRef = useRef(0);
-  const lastForeignPauseRef = useRef(0);
-  const handleEndedRef = useRef(null);
-  const handlePlayerErrorRef = useRef(null);
-  const [isForeground, setIsForeground] = useState(true);
 
   const currentTrack = currentIndex >= 0 ? (queue[currentIndex] ?? null) : null;
   const hasNext =
@@ -205,61 +158,13 @@ export function PlayerProvider({ children }) {
     setSleepTimerState(next);
   }, []);
 
-
-  // ===== Điều khiển trình phát (YouTube IFrame là nguồn phát duy nhất) =====
-
-  const getPlayerTime = useCallback(() => {
-    const player = playerRef.current;
-    return typeof player?.getCurrentTime === "function" ? player.getCurrentTime() || 0 : 0;
-  }, []);
-
-  const getPlayerDuration = useCallback(() => {
-    const player = playerRef.current;
-    return typeof player?.getDuration === "function" ? player.getDuration() || 0 : 0;
-  }, []);
-
-  const playPlayer = useCallback(() => {
-    const player = playerRef.current;
-    if (typeof player?.playVideo === "function") player.playVideo();
-  }, []);
-
-  // Pause và đánh dấu là do app chủ động, để logic tự-phát-lại không cãi nhau với nó
-  const pausePlayer = useCallback(() => {
-    const player = playerRef.current;
-    if (!player || typeof player.pauseVideo !== "function") return;
-    ownPauseRef.current = true;
-    clearTimeout(ownPauseTimerRef.current);
-    ownPauseTimerRef.current = setTimeout(() => {
-      ownPauseRef.current = false;
-    }, OWN_PAUSE_MARK_MS);
-    player.pauseVideo();
-  }, []);
-
-  // Trình duyệt tự pause video ngay sau khi ẩn tab: thử bấm phát lại, có giới hạn thời gian và số lần
-  const tryResumePlayback = useCallback(() => {
-    if (!resumeOnHideRef.current) return false;
-    if (document.visibilityState !== "hidden") return false;
-    if (resumeAttemptsRef.current >= MAX_RESUME_ATTEMPTS) return false;
-
-    if (hiddenSinceRef.current === 0) hiddenSinceRef.current = Date.now();
-    if (Date.now() - hiddenSinceRef.current >= RESUME_WINDOW_MS) return false;
-
-    const player = playerRef.current;
-    if (typeof player?.playVideo !== "function") return false;
-
-    resumeAttemptsRef.current += 1;
-    logBg("resume.try", String(resumeAttemptsRef.current));
-    startKeepAlive();
-    player.playVideo();
-    return true;
-  }, []);
-
   const loadIndex = useCallback(
     (index, { auto = false } = {}) => {
       const track = queueRef.current[index];
       if (!track || !playerRef.current) return;
       pendingCueRef.current = null;
       cuedPositionRef.current = null;
+      if (auto) startAtRef.current = null;
       if (!auto) {
         errorStreakRef.current = 0;
         clearTimeout(errorTimerRef.current);
@@ -268,16 +173,7 @@ export function PlayerProvider({ children }) {
       setCurrentIndexSynced(index);
       setCurrentTime(0);
       setDuration(0);
-
-      // Tab đang ẩn: mở lại cửa sổ tự-phát-lại cho bài mới (trình duyệt hay pause ngay sau khi đổi bài)
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        hiddenSinceRef.current = Date.now();
-        resumeAttemptsRef.current = 0;
-      }
-
-      if (typeof playerRef.current.loadVideoById === "function") {
-        playerRef.current.loadVideoById(track.videoId);
-      }
+      playerRef.current.loadVideoById(track.videoId);
     },
     [setCurrentIndexSynced]
   );
@@ -285,11 +181,7 @@ export function PlayerProvider({ children }) {
   const { onSignedOut, userId } = useAuth();
 
   const resetPlayer = useCallback(() => {
-    if (playerRef.current && typeof playerRef.current.stopVideo === "function") {
-      playerRef.current.stopVideo();
-    }
-    // Gọi thẳng, không dựa vào effect Media Session (trình duyệt không hỗ trợ sẽ không chạy effect đó)
-    stopKeepAlive();
+    if (playerRef.current) playerRef.current.stopVideo();
     pendingIndexRef.current = null;
     errorStreakRef.current = 0;
     clearTimeout(errorTimerRef.current);
@@ -317,27 +209,16 @@ export function PlayerProvider({ children }) {
     }
   }, []);
 
-  const handlePlayerError = useCallback(
-    (code) => {
-      const index = currentIndexRef.current;
-      if (index < 0) return;
-
-      const failedTrack = queueRef.current[index];
-      const reason = PLAYER_ERROR_REASONS[code] || `Lỗi không xác định (mã ${code})`;
-
+  const skipAfterError = useCallback(
+    (index, failedTrack, reason) => {
       errorStreakRef.current += 1;
-      setIsPlaying(false);
 
-      const lastIndex = queueRef.current.length - 1;
-      const hasFollowing = index < lastIndex;
-      // Repeat All: bài cuối lỗi thì vòng về bài đầu, giống handleEnded.
-      // Cần > 1 bài, nếu không sẽ thử lại đúng bài vừa lỗi.
-      const canWrap = repeatRef.current === "all" && lastIndex > 0 && index >= lastIndex;
+      const hasNext = index + 1 < queueRef.current.length;
       const tooMany = errorStreakRef.current >= MAX_CONSECUTIVE_ERRORS;
 
-      if ((hasFollowing || canWrap) && !tooMany) {
+      if (hasNext && !tooMany) {
         showPlaybackError(`${reason} — đã bỏ qua: ${failedTrack?.title ?? "bài này"}`, true);
-        loadIndex(hasFollowing ? index + 1 : 0, { auto: true });
+        loadIndex(index + 1, { auto: true });
         return;
       }
 
@@ -349,6 +230,65 @@ export function PlayerProvider({ children }) {
       );
     },
     [loadIndex, showPlaybackError]
+  );
+
+  const tryAlternate = useCallback(
+    async (index, failedTrack, reason) => {
+      const stillCurrent = () =>
+        currentIndexRef.current === index && queueRef.current[index]?.queueId === failedTrack.queueId;
+
+      try {
+        const params = new URLSearchParams({
+          videoId: failedTrack.videoId,
+          title: failedTrack.title || "",
+          channel: failedTrack.channelTitle || "",
+        });
+        if (failedTrack.durationSeconds) params.set("duration", String(failedTrack.durationSeconds));
+
+        const res = await authedFetch(`/api/youtube/alternate?${params}`);
+        const data = await res.json();
+        if (!stillCurrent()) return;
+
+        if (!res.ok || !data.item) {
+          skipAfterError(index, failedTrack, reason);
+          return;
+        }
+
+        const next = queueRef.current.slice();
+        next[index] = {
+          ...data.item,
+          queueId: failedTrack.queueId,
+          origin: failedTrack.origin,
+          triedAlternate: true,
+        };
+        setQueueSynced(next);
+        loadIndex(index, { auto: true });
+        showPlaybackError(`${reason} — đã chuyển sang bản khác`, true);
+      } catch {
+        if (stillCurrent()) skipAfterError(index, failedTrack, reason);
+      }
+    },
+    [loadIndex, setQueueSynced, showPlaybackError, skipAfterError]
+  );
+
+  const handlePlayerError = useCallback(
+    (code) => {
+      const index = currentIndexRef.current;
+      if (index < 0) return;
+
+      const failedTrack = queueRef.current[index];
+      const reason = PLAYER_ERROR_REASONS[code] || `Lỗi không xác định (mã ${code})`;
+      setIsPlaying(false);
+
+      if (ALTERNATE_CODES.includes(code) && failedTrack && !failedTrack.triedAlternate) {
+        showPlaybackError(`${reason} — đang tìm bản khác...`, false);
+        tryAlternate(index, failedTrack, reason);
+        return;
+      }
+
+      skipAfterError(index, failedTrack, reason);
+    },
+    [showPlaybackError, skipAfterError, tryAlternate]
   );
 
   const playTrackAt = useCallback(
@@ -364,7 +304,7 @@ export function PlayerProvider({ children }) {
 
   const seekTo = useCallback(
     (seconds) => {
-      if (!playerRef.current || !isReady || typeof playerRef.current.seekTo !== "function") return;
+      if (!playerRef.current || !isReady) return;
       playerRef.current.seekTo(seconds, true);
       if (cuedPositionRef.current !== null) cuedPositionRef.current = seconds;
       seekHoldUntilRef.current = Date.now() + SEEK_HOLD_MS;
@@ -375,13 +315,14 @@ export function PlayerProvider({ children }) {
 
   const seekBy = useCallback(
     (offset) => {
-      if (!playerRef.current) return;
-      const now = getPlayerTime();
-      const total = getPlayerDuration();
+      const player = playerRef.current;
+      if (!player) return;
+      const now = player.getCurrentTime?.() || 0;
+      const total = player.getDuration?.() || 0;
       const target = Math.max(0, now + offset);
       seekTo(total > 0 ? Math.min(target, total) : target);
     },
-    [seekTo, getPlayerTime, getPlayerDuration]
+    [seekTo]
   );
 
   const playNext = useCallback(() => {
@@ -393,21 +334,28 @@ export function PlayerProvider({ children }) {
 
   const playPrev = useCallback(() => {
     if (currentIndexRef.current < 0) return;
-    const elapsed = getPlayerTime();
+    const elapsed = playerRef.current?.getCurrentTime?.() || 0;
     const prev = currentIndexRef.current - 1;
     if (prev < 0 || elapsed > RESTART_THRESHOLD_SECONDS) {
       seekTo(0);
       return;
     }
     playTrackAt(prev);
-  }, [seekTo, playTrackAt, getPlayerTime]);
-
-  const setVideoFrame = useCallback((frame) => {
-    setVideoFrameState((current) => (sameFrame(current, frame) ? current : frame));
-  }, []);
+  }, [seekTo, playTrackAt]);
 
   const openNowPlaying = useCallback(() => setNowPlayingOpen(true), []);
   const closeNowPlaying = useCallback(() => setNowPlayingOpen(false), []);
+
+  const pausePlayer = useCallback(() => {
+    const player = playerRef.current;
+    if (!player) return;
+    ownPauseRef.current = true;
+    clearTimeout(ownPauseTimerRef.current);
+    ownPauseTimerRef.current = setTimeout(() => {
+      ownPauseRef.current = false;
+    }, OWN_PAUSE_MARK_MS);
+    player.pauseVideo();
+  }, []);
 
   const setResumeOnHide = useCallback((enabled) => {
     const value = Boolean(enabled);
@@ -425,8 +373,8 @@ export function PlayerProvider({ children }) {
   const togglePlay = useCallback(() => {
     if (!playerRef.current || !isReady) return;
     if (isPlaying) pausePlayer();
-    else playPlayer();
-  }, [isPlaying, isReady, pausePlayer, playPlayer]);
+    else playerRef.current.playVideo();
+  }, [isPlaying, isReady, pausePlayer]);
 
   const handleEnded = useCallback(() => {
     if (sleepTimerRef.current?.kind === "track") {
@@ -435,9 +383,9 @@ export function PlayerProvider({ children }) {
     }
 
     const player = playerRef.current;
-    if (repeatRef.current === "one" && player && typeof player.seekTo === "function") {
+    if (repeatRef.current === "one" && player) {
       player.seekTo(0, true);
-      if (typeof player.playVideo === "function") player.playVideo();
+      player.playVideo();
       setCurrentTime(0);
       return;
     }
@@ -448,9 +396,11 @@ export function PlayerProvider({ children }) {
   }, [loadIndex, updateSleepTimer]);
 
   const playQueue = useCallback(
-    (tracks, startIndex = 0) => {
+    (tracks, startIndex = 0, options = {}) => {
       if (!tracks?.[startIndex]) return;
 
+      radioSeqRef.current += 1;
+      startAtRef.current = options.startAt > 0 ? options.startAt : null;
       pendingCueRef.current = null;
       cuedPositionRef.current = null;
       const entries = tracks.map(makeEntry);
@@ -561,10 +511,77 @@ export function PlayerProvider({ children }) {
   );
 
   const clearUpcoming = useCallback(() => {
-    const anchor = anchorIndex(currentIndexRef.current, pendingIndexRef.current);
-    if (anchor < 0) return;
-    setQueueSynced(queueRef.current.slice(0, anchor + 1));
+    const index = currentIndexRef.current;
+    if (index < 0) return;
+    radioSeqRef.current += 1;
+    setQueueSynced(queueRef.current.slice(0, index + 1));
   }, [setQueueSynced]);
+
+  const requestRadio = useCallback(
+    async (seed) => {
+      if (!seed || radioBusyRef.current) return;
+      radioBusyRef.current = true;
+      const seq = radioSeqRef.current;
+
+      try {
+        const params = new URLSearchParams({
+          videoId: seed.videoId,
+          title: seed.title || "",
+          channel: seed.channelTitle || "",
+        });
+        if (seed.channelId) params.set("channelId", seed.channelId);
+
+        const res = await authedFetch(`/api/youtube/next?${params}`);
+        const data = await res.json();
+        if (!res.ok || seq !== radioSeqRef.current) return;
+
+        const known = new Set(queueRef.current.map((entry) => entry.videoId));
+        const fresh = (data.items || [])
+          .filter((track) => !known.has(track.videoId))
+          .slice(0, RADIO_BATCH)
+          .map((track) => makeEntry({ ...track, origin: "radio" }));
+        if (fresh.length === 0) return;
+
+        if (shuffleRef.current) {
+          shuffleOriginalRef.current = [
+            ...shuffleOriginalRef.current,
+            ...fresh.map((entry) => entry.queueId),
+          ];
+        }
+        setQueueSynced([...queueRef.current, ...fresh]);
+      } catch {
+      } finally {
+        radioBusyRef.current = false;
+      }
+    },
+    [makeEntry, setQueueSynced]
+  );
+
+  const playTrackWithRadio = useCallback(
+    (track, options = {}) => {
+      playQueue([track], 0, options);
+      if (autoplayRef.current) requestRadio(track);
+    },
+    [playQueue, requestRadio]
+  );
+
+  const setAutoplay = useCallback((enabled) => {
+    const value = Boolean(enabled);
+    autoplayRef.current = value;
+    setAutoplayState(value);
+    try {
+      window.localStorage.setItem(AUTOPLAY_STORAGE_KEY, value ? "1" : "0");
+    } catch {
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!autoplay || currentIndex < 0 || queue.length === 0) return;
+    if (queue.length - 1 - currentIndex > 2) return;
+    const last = queue[queue.length - 1];
+    if (last?.origin !== "radio") return;
+    requestRadio(last);
+  }, [autoplay, currentIndex, queue, requestRadio]);
 
   const toggleShuffle = useCallback(() => {
     const turningOn = !shuffleRef.current;
@@ -572,25 +589,19 @@ export function PlayerProvider({ children }) {
     setShuffle(turningOn);
 
     const current = queueRef.current;
-    const currentIdx = currentIndexRef.current;
-    const pendingIdx = pendingIndexRef.current;
+    const index = currentIndexRef.current;
 
     if (turningOn) {
-      // Mọi bài từ đầu đến anchor đứng yên, nên cả currentIndex lẫn pendingIndex vẫn đúng
-      const anchor = anchorIndex(currentIdx, pendingIdx);
       shuffleOriginalRef.current = current.map((entry) => entry.queueId);
-      setQueueSynced([...current.slice(0, anchor + 1), ...shuffleArray(current.slice(anchor + 1))]);
+      setQueueSynced([...current.slice(0, index + 1), ...shuffleArray(current.slice(index + 1))]);
       return;
     }
 
-    // Tắt shuffle: thứ tự đổi nên phải dò lại vị trí của cả bài đang phát lẫn bài đang chờ
-    const currentEntry = current[currentIdx];
-    const pendingEntry = pendingIdx !== null ? current[pendingIdx] : undefined;
+    const currentEntry = current[index];
     const restored = restoreOriginalOrder(current, shuffleOriginalRef.current);
     shuffleOriginalRef.current = [];
     setQueueSynced(restored);
     if (currentEntry) setCurrentIndexSynced(restored.indexOf(currentEntry));
-    if (pendingEntry) pendingIndexRef.current = restored.indexOf(pendingEntry);
   }, [setQueueSynced, setCurrentIndexSynced]);
 
   const cycleRepeat = useCallback(() => {
@@ -608,9 +619,9 @@ export function PlayerProvider({ children }) {
     if (clamped > 0 && mutedRef.current) {
       mutedRef.current = false;
       setIsMuted(false);
-      if (typeof player?.unMute === "function") player.unMute();
+      player?.unMute?.();
     }
-    if (typeof player?.setVolume === "function") player.setVolume(clamped);
+    player?.setVolume?.(clamped);
   }, []);
 
   const toggleMute = useCallback(() => {
@@ -618,8 +629,8 @@ export function PlayerProvider({ children }) {
     mutedRef.current = next;
     setIsMuted(next);
     const player = readyRef.current ? playerRef.current : null;
-    if (next && typeof player?.mute === "function") player.mute();
-    else if (!next && typeof player?.unMute === "function") player.unMute();
+    if (next) player?.mute?.();
+    else player?.unMute?.();
   }, []);
 
   const setSleepTimer = useCallback(
@@ -637,7 +648,6 @@ export function PlayerProvider({ children }) {
 
   const applySavedState = useCallback(
     (saved) => {
-      // `saved` đã qua sanitizeState trong loadPlayerState nên các giá trị ở đây đã hợp lệ
       const maxId = saved.queue.reduce((max, entry) => Math.max(max, entry.queueId), 0);
       entryCounterRef.current = Math.max(entryCounterRef.current, maxId);
 
@@ -661,10 +671,10 @@ export function PlayerProvider({ children }) {
 
       const player = playerRef.current;
       if (readyRef.current && player) {
-        if (typeof player.setVolume === "function") player.setVolume(saved.volume);
-        if (saved.muted && typeof player.mute === "function") player.mute();
-        else if (!saved.muted && typeof player.unMute === "function") player.unMute();
-        if (typeof player.cueVideoById === "function") player.cueVideoById(cue);
+        player.setVolume?.(saved.volume);
+        if (saved.muted) player.mute?.();
+        else player.unMute?.();
+        player.cueVideoById?.(cue);
       } else {
         pendingCueRef.current = cue;
       }
@@ -677,24 +687,14 @@ export function PlayerProvider({ children }) {
   }, [userId]);
 
   useEffect(() => {
-    if (!userId) return;
-
-    // restoreDoneRef = tài khoản mà trạng thái hiện trong player đang thuộc về.
-    // Vẫn là tài khoản đó thì không làm gì cả.
-    const loadedFor = restoreDoneRef.current;
-    if (loadedFor === userId) return;
-
-    // Chuyển thẳng A -> B (không qua đăng xuất): bỏ hàng đợi của A trước khi khôi phục B.
-    // Khách (loadedFor = null) đăng nhập lần đầu thì giữ nguyên hàng đợi đang nghe.
-    if (loadedFor) resetPlayer();
-
+    if (!userId || restoreDoneRef.current === userId) return;
     restoreDoneRef.current = userId;
     if (queueRef.current.length > 0) return;
 
-    // loadPlayerState đã tự kiểm tra/chuẩn hoá dữ liệu và không ném lỗi
     const saved = loadPlayerState(userId);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (saved) applySavedState(saved);
-  }, [userId, applySavedState, resetPlayer]);
+  }, [userId, applySavedState]);
 
   const persistNow = useCallback(() => {
     const id = userIdRef.current;
@@ -704,14 +704,14 @@ export function PlayerProvider({ children }) {
     const index = currentIndexRef.current >= 0 ? currentIndexRef.current : pendingIndexRef.current;
     if (queueNow.length === 0 || index === null || index < 0) return;
 
+    const player = playerRef.current;
     const position =
       cuedPositionRef.current !== null
         ? cuedPositionRef.current
-        : readyRef.current
-          ? getPlayerTime()
+        : readyRef.current && player
+          ? player.getCurrentTime?.() || 0
           : 0;
 
-    lastPersistAtRef.current = Date.now();
     savePlayerState(id, {
       queue: queueNow,
       currentIndex: index,
@@ -722,28 +722,18 @@ export function PlayerProvider({ children }) {
       muted: mutedRef.current,
       shuffleOriginal: shuffleOriginalRef.current,
     });
-  }, [getPlayerTime]);
+  }, []);
 
   useEffect(() => {
     const id = setTimeout(persistNow, PERSIST_DEBOUNCE_MS);
     return () => clearTimeout(id);
   }, [queue, currentIndex, shuffle, repeat, volume, isMuted, userId, persistNow]);
 
-  // Gọi từ mỗi lần lấy mẫu thời gian khi tab đang hiện; tối đa mỗi PERSIST_INTERVAL_MS mới ghi một lần
-  // nên không cần một setInterval riêng chỉ để lưu.
-  const persistThrottled = useCallback(() => {
-    if (Date.now() - lastPersistAtRef.current < PERSIST_INTERVAL_MS) return;
-    persistNow();
-  }, [persistNow]);
-
-  // Khi đang tạm dừng thì không có lấy mẫu nào chạy, nên kéo thanh thời gian phải tự kích hoạt lưu.
-  // Không gộp vào effect debounce phía trên: lúc đang phát currentTime đổi mỗi 500ms < 800ms
-  // nên timer sẽ bị huỷ liên tục và không bao giờ kịp lưu.
   useEffect(() => {
-    if (isPlaying) return;
-    const id = setTimeout(persistNow, PERSIST_DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [currentTime, isPlaying, persistNow]);
+    if (!isPlaying) return;
+    const id = setInterval(persistNow, PERSIST_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [isPlaying, persistNow]);
 
   useEffect(() => {
     const onVisibility = () => {
@@ -770,36 +760,15 @@ export function PlayerProvider({ children }) {
 
   useEffect(() => {
     const onVisibility = () => {
-      const hidden = document.visibilityState === "hidden";
       logBg("visibility", document.visibilityState);
-      setIsForeground(!hidden);
-
-      const player = playerRef.current;
-      const state = typeof player?.getPlayerState === "function" ? player.getPlayerState() : null;
-      const active = state === YT_STATE.PLAYING || state === YT_STATE.BUFFERING;
-
-      if (hidden) {
+      if (document.visibilityState === "hidden") {
         hiddenSinceRef.current = Date.now();
+      } else {
+        hiddenSinceRef.current = 0;
         resumeAttemptsRef.current = 0;
-
-        // Người dùng không bật phát nền thì không tự phát gì cả (kể cả khi trước đó họ đã bấm tạm dừng)
-        if (!resumeOnHideRef.current) return;
-
-        if (active) {
-          startKeepAlive();
-        } else if (
-          state === YT_STATE.PAUSED &&
-          Date.now() - lastForeignPauseRef.current < HIDE_PAUSE_GRACE_MS
-        ) {
-          // Trình duyệt vừa pause ngay trước khi ẩn tab -> coi là bị gián đoạn
-          tryResumePlayback();
-        }
-        return;
+        const state = playerRef.current?.getPlayerState?.();
+        if (state !== 1 && state !== 3) stopKeepAlive();
       }
-
-      hiddenSinceRef.current = 0;
-      resumeAttemptsRef.current = 0;
-      if (!active) stopKeepAlive();
     };
     const onFreeze = () => logBg("page.freeze");
     const onResume = () => logBg("page.resume");
@@ -811,7 +780,7 @@ export function PlayerProvider({ children }) {
       document.removeEventListener("freeze", onFreeze);
       document.removeEventListener("resume", onResume);
     };
-  }, [tryResumePlayback]);
+  }, []);
 
   useEffect(() => {
     return () => clearTimeout(ownPauseTimerRef.current);
@@ -825,10 +794,12 @@ export function PlayerProvider({ children }) {
     }
   }, [isReady, loadIndex]);
 
+  const handleEndedRef = useRef(handleEnded);
   useEffect(() => {
     handleEndedRef.current = handleEnded;
   }, [handleEnded]);
 
+  const handlePlayerErrorRef = useRef(handlePlayerError);
   useEffect(() => {
     handlePlayerErrorRef.current = handlePlayerError;
   }, [handlePlayerError]);
@@ -859,14 +830,10 @@ export function PlayerProvider({ children }) {
           onReady: () => {
             readyRef.current = true;
             const player = playerRef.current;
-            if (typeof player?.setVolume === "function") player.setVolume(volumeRef.current);
-            if (mutedRef.current && typeof player?.mute === "function") player.mute();
-            if (
-              pendingCueRef.current &&
-              pendingIndexRef.current === null &&
-              typeof player?.cueVideoById === "function"
-            ) {
-              player.cueVideoById(pendingCueRef.current);
+            player?.setVolume?.(volumeRef.current);
+            if (mutedRef.current) player?.mute?.();
+            if (pendingCueRef.current && pendingIndexRef.current === null) {
+              player?.cueVideoById?.(pendingCueRef.current);
             }
             pendingCueRef.current = null;
             setIsReady(true);
@@ -878,6 +845,11 @@ export function PlayerProvider({ children }) {
               errorStreakRef.current = 0;
               cuedPositionRef.current = null;
               if (resumeOnHideRef.current) startKeepAlive();
+              if (startAtRef.current !== null) {
+                const target = startAtRef.current;
+                startAtRef.current = null;
+                playerRef.current?.seekTo(target, true);
+              }
             }
             if (event.data === YT.PlayerState.CUED) {
               setDuration(playerRef.current?.getDuration?.() || 0);
@@ -885,22 +857,25 @@ export function PlayerProvider({ children }) {
             if (event.data === YT.PlayerState.PAUSED) {
               const ownPause = ownPauseRef.current;
               ownPauseRef.current = false;
-
-              if (ownPause) {
-                // Người dùng/app chủ động dừng: không tự phát lại
-                stopKeepAlive();
-              } else {
-                lastForeignPauseRef.current = Date.now();
-                tryResumePlayback();
+              const hiddenFor = hiddenSinceRef.current ? Date.now() - hiddenSinceRef.current : 0;
+              if (ownPause) stopKeepAlive();
+              if (
+                !ownPause &&
+                resumeOnHideRef.current &&
+                resumeAttemptsRef.current < MAX_RESUME_ATTEMPTS &&
+                document.visibilityState === "hidden" &&
+                hiddenFor < RESUME_WINDOW_MS
+              ) {
+                resumeAttemptsRef.current += 1;
+                logBg("resume.try", String(resumeAttemptsRef.current));
+                playerRef.current?.playVideo();
               }
             }
             if (event.data === YT.PlayerState.ENDED) {
-              handleEndedRef.current?.();
+              handleEndedRef.current();
             }
           },
-          onError: (event) => {
-            handlePlayerErrorRef.current?.(event.data);
-          },
+          onError: (event) => handlePlayerErrorRef.current(event.data),
         },
       });
     }).catch((err) => {
@@ -911,43 +886,23 @@ export function PlayerProvider({ children }) {
 
     return () => {
       cancelled = true;
-
-      // Huỷ iframe cũ khi unmount hoặc khi thử tải lại, kẻo trình phát cũ vẫn còn trong DOM
-      const player = playerRef.current;
-      if (player && typeof player.destroy === "function") {
-        try {
-          player.destroy();
-        } catch (err) {
-          console.warn("Không huỷ được trình phát YouTube:", err);
-        }
-      }
-      playerRef.current = null;
-      readyRef.current = false;
-      setIsReady(false);
-      setIsPlaying(false);
-      stopKeepAlive();
     };
-  }, [loadAttempt, tryResumePlayback]);
+  }, [loadAttempt]);
 
   useEffect(() => {
-    // IFrame API không có sự kiện timeupdate nên buộc phải lấy mẫu định kỳ, nhưng chỉ khi tab đang hiện:
-    // ở nền không ai nhìn thanh thời gian nên không cần vòng lặp nào, đỡ tốn pin.
-    if (!isPlaying || !isForeground || !playerRef.current) return;
+    if (!isPlaying || !playerRef.current) return;
 
     const interval = setInterval(() => {
       const player = playerRef.current;
       if (!player) return;
-      if (Date.now() >= seekHoldUntilRef.current && typeof player.getCurrentTime === "function") {
-        setCurrentTime(player.getCurrentTime() || 0);
+      if (Date.now() >= seekHoldUntilRef.current) {
+        setCurrentTime(player.getCurrentTime?.() || 0);
       }
-      if (typeof player.getDuration === "function") {
-        setDuration(player.getDuration() || 0);
-      }
-      persistThrottled();
+      setDuration(player.getDuration?.() || 0);
     }, 500);
 
     return () => clearInterval(interval);
-  }, [isPlaying, isForeground, persistThrottled]);
+  }, [isPlaying]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("mediaSession" in navigator)) return;
@@ -965,23 +920,23 @@ export function PlayerProvider({ children }) {
       stopKeepAlive();
     }
 
-    setMediaAction("play", () => {
+    navigator.mediaSession.setActionHandler("play", () => {
       logBg("mediasession", "play");
-      playPlayer();
+      playerRef.current?.playVideo();
     });
-    setMediaAction("pause", () => {
+    navigator.mediaSession.setActionHandler("pause", () => {
       logBg("mediasession", "pause");
       pausePlayer();
     });
-    setMediaAction("nexttrack", () => {
+    navigator.mediaSession.setActionHandler("nexttrack", () => {
       logBg("mediasession", "next");
       playNext();
     });
-    setMediaAction("previoustrack", () => {
+    navigator.mediaSession.setActionHandler("previoustrack", () => {
       logBg("mediasession", "previous");
       playPrev();
     });
-  }, [currentTrack, playNext, playPrev, pausePlayer, playPlayer]);
+  }, [currentTrack, playNext, playPrev, pausePlayer]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !("mediaSession" in navigator)) return;
@@ -991,11 +946,18 @@ export function PlayerProvider({ children }) {
   useEffect(() => {
     if (typeof window === "undefined" || !("mediaSession" in navigator)) return;
 
-    setMediaAction("seekto", (details) => {
+    const setHandler = (action, handler) => {
+      try {
+        navigator.mediaSession.setActionHandler(action, handler);
+      } catch {
+      }
+    };
+
+    setHandler("seekto", (details) => {
       if (typeof details?.seekTime === "number") seekTo(details.seekTime);
     });
-    setMediaAction("seekbackward", (details) => seekBy(-(details?.seekOffset || SEEK_STEP_SECONDS)));
-    setMediaAction("seekforward", (details) => seekBy(details?.seekOffset || SEEK_STEP_SECONDS));
+    setHandler("seekbackward", (details) => seekBy(-(details?.seekOffset || SEEK_STEP_SECONDS)));
+    setHandler("seekforward", (details) => seekBy(details?.seekOffset || SEEK_STEP_SECONDS));
   }, [seekTo, seekBy]);
 
   useEffect(() => {
@@ -1013,7 +975,6 @@ export function PlayerProvider({ children }) {
     }
   }, [currentTime, duration]);
 
-  const frameVisible = videoFrame !== null && currentTrack !== null;
 
   const stateValue = useMemo(
     () => ({
@@ -1031,7 +992,6 @@ export function PlayerProvider({ children }) {
       closeNowPlaying,
       videoContainerRef: containerRef,
       miniThumbRef,
-      setVideoFrame,
       shuffle,
       repeat,
       volume,
@@ -1039,6 +999,9 @@ export function PlayerProvider({ children }) {
       sleepTimer,
       resumeOnHide,
       playQueue,
+      playTrackWithRadio,
+      autoplay,
+      setAutoplay,
       playTrackAt,
       playNext,
       playPrev,
@@ -1072,7 +1035,6 @@ export function PlayerProvider({ children }) {
       closeNowPlaying,
       containerRef,
       miniThumbRef,
-      setVideoFrame,
       shuffle,
       repeat,
       volume,
@@ -1080,6 +1042,9 @@ export function PlayerProvider({ children }) {
       sleepTimer,
       resumeOnHide,
       playQueue,
+      playTrackWithRadio,
+      autoplay,
+      setAutoplay,
       playTrackAt,
       playNext,
       playPrev,
@@ -1106,11 +1071,6 @@ export function PlayerProvider({ children }) {
     <PlayerContext.Provider value={stateValue}>
       <PlayerTimeContext.Provider value={timeValue}>
         {children}
-        <div
-          ref={containerRef}
-          className="[&_iframe]:block [&_iframe]:h-full [&_iframe]:w-full"
-          style={frameVisible ? frameStyle(videoFrame) : CONTAINER_CLOSED_STYLE}
-        />
       </PlayerTimeContext.Provider>
     </PlayerContext.Provider>
   );
