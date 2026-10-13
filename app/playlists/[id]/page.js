@@ -7,15 +7,18 @@ import {
   ArrowUp,
   GripVertical,
   Link2,
+  Link2Off,
   ListMusic,
   Pencil,
   Play,
   Plus,
   Share2,
+  Shuffle,
   Trash2,
   X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
+import ActionMenu from "@/components/ActionMenu";
 import EmptyState from "@/components/EmptyState";
 import PageHeader from "@/components/PageHeader";
 import RequireAuth from "@/components/RequireAuth";
@@ -35,7 +38,7 @@ function PlaylistDetailContent() {
   const { id } = useParams();
   const router = useRouter();
   const { showToast } = useToast();
-  const { playQueue } = usePlayer();
+  const { playQueue, playShuffled } = usePlayer();
 
   const [playlist, setPlaylist] = useState(null);
   const [tracks, setTracks] = useState([]);
@@ -213,6 +216,31 @@ function PlaylistDetailContent() {
     if (queueTracks.length > 0) playQueue(queueTracks, index);
   };
 
+  const playShuffledAll = () => {
+    const queueTracks = tracks.map(trackFromRow);
+    if (queueTracks.length > 0) playShuffled(queueTracks);
+  };
+
+  const menuItems = [
+    {
+      label: shareToken ? "Sao chép liên kết chia sẻ" : "Chia sẻ playlist",
+      icon: shareToken ? Link2 : Share2,
+      onClick: handleShare,
+    },
+    ...(shareToken
+      ? [{ label: "Tắt chia sẻ", icon: Link2Off, onClick: handleStopSharing }]
+      : []),
+    {
+      label: "Đổi tên playlist",
+      icon: Pencil,
+      onClick: () => {
+        setNameDraft(playlist?.name || "");
+        setRenaming(true);
+      },
+    },
+    { label: "Xoá playlist", icon: Trash2, danger: true, onClick: () => setConfirmDelete(true) },
+  ];
+
   const rowClass = (index) => {
     let extra = "";
     if (drag && drag.from === index) extra = " opacity-50";
@@ -222,7 +250,7 @@ function PlaylistDetailContent() {
           ? " shadow-[inset_0_2px_0_0_var(--accent)]"
           : " shadow-[inset_0_-2px_0_0_var(--accent)]";
     }
-    return `flex items-center gap-1 rounded-2xl px-2 py-1.5 transition-colors hover:bg-white/5${extra}`;
+    return `flex items-center gap-1 rounded-2xl px-2 py-1.5 transition-colors hover:bg-foreground/5${extra}`;
   };
 
   return (
@@ -245,42 +273,19 @@ function PlaylistDetailContent() {
         </form>
       ) : (
         <PageHeader title={playlist?.name || "Playlist"} subtitle={tracksLoaded ? `${tracks.length} bài` : null}>
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="flex flex-wrap items-center gap-2">
             {tracks.length > 0 && (
-              <button type="button" onClick={() => playFrom(0)} className="btn-primary mr-1">
-                <Play size={18} fill="currentColor" />
-                Phát tất cả
-              </button>
+              <>
+                <button type="button" onClick={() => playFrom(0)} className="btn-primary h-11">
+                  <Play size={18} fill="currentColor" />
+                  Phát tất cả
+                </button>
+                <button type="button" onClick={playShuffledAll} className="btn-ghost h-11">
+                  <Shuffle size={18} />
+                  Phát ngẫu nhiên
+                </button>
+              </>
             )}
-            <button
-              type="button"
-              onClick={handleShare}
-              aria-label={shareToken ? "Sao chép liên kết chia sẻ" : "Chia sẻ playlist"}
-              className="icon-btn"
-              data-active={Boolean(shareToken)}
-            >
-              {shareToken ? <Link2 size={18} /> : <Share2 size={18} />}
-            </button>
-            {shareToken && (
-              <button
-                type="button"
-                onClick={handleStopSharing}
-                className="rounded-full px-2.5 py-1 text-xs font-semibold text-muted transition hover:bg-white/10 hover:text-foreground"
-              >
-                Tắt chia sẻ
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                setNameDraft(playlist?.name || "");
-                setRenaming(true);
-              }}
-              aria-label="Đổi tên playlist"
-              className="icon-btn"
-            >
-              <Pencil size={18} />
-            </button>
             {confirmDelete ? (
               <span className="menu-pop flex items-center gap-2 rounded-full border-2 border-danger/50 py-1 pl-4 pr-1 text-sm">
                 <span className="text-danger">Xoá playlist này?</span>
@@ -300,14 +305,7 @@ function PlaylistDetailContent() {
                 </button>
               </span>
             ) : (
-              <button
-                type="button"
-                onClick={() => setConfirmDelete(true)}
-                aria-label="Xoá playlist"
-                className="icon-btn hover:text-danger"
-              >
-                <Trash2 size={18} />
-              </button>
+              <ActionMenu items={menuItems} label="Tuỳ chọn playlist" />
             )}
           </div>
         </PageHeader>
@@ -392,7 +390,7 @@ function PlaylistDetailContent() {
         {searchResults.map((track) => (
           <li
             key={track.videoId}
-            className="flex items-center gap-3 rounded-2xl px-2 py-1.5 transition-colors hover:bg-white/5"
+            className="flex items-center gap-3 rounded-2xl px-2 py-1.5 transition-colors hover:bg-foreground/5"
           >
             <span className="relative aspect-video w-20 shrink-0 overflow-hidden rounded-lg bg-surface-2">
               {track.thumbnail ? (

@@ -64,7 +64,7 @@ export default function AccountMenu() {
         aria-label="Tài khoản"
         aria-haspopup="menu"
         aria-expanded={open}
-        className="block h-11 w-11 overflow-hidden rounded-full border-2 border-border transition duration-200 hover:border-accent aria-expanded:border-accent aria-expanded:shadow-[0_0_0_4px_rgb(254_222_41/0.2)]"
+        className="pressable block h-11 w-11 overflow-hidden rounded-full border-2 border-border hover:border-accent aria-expanded:border-accent aria-expanded:shadow-[0_0_0_4px_var(--accent-glow)]"
       >
         {avatarUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -93,7 +93,7 @@ export default function AccountMenu() {
             href="/settings"
             role="menuitem"
             onClick={() => setOpen(false)}
-            className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition hover:bg-white/8"
+            className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition hover:bg-foreground/8"
           >
             <Settings size={17} className="text-muted" />
             Cài đặt tài khoản
@@ -103,7 +103,7 @@ export default function AccountMenu() {
               type="button"
               role="menuitem"
               onClick={handleInstall}
-              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition hover:bg-white/8"
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition hover:bg-foreground/8"
             >
               <Download size={17} className="text-muted" />
               Cài ứng dụng
@@ -113,7 +113,7 @@ export default function AccountMenu() {
             type="button"
             role="menuitem"
             onClick={handleLogout}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-danger transition hover:bg-white/8"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm text-danger transition hover:bg-foreground/8"
           >
             <LogOut size={17} />
             Đăng xuất

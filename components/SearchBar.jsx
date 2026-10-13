@@ -164,7 +164,7 @@ export default function SearchBar() {
       <form
         role="search"
         onSubmit={handleSubmit}
-        className="flex items-center rounded-full bg-accent text-accent-ink shadow-[0_3px_0_0_var(--accent-lip)] transition-shadow duration-200 focus-within:shadow-[0_3px_0_0_var(--accent-lip),0_0_0_4px_rgb(254_222_41/0.28)]"
+        className="flex items-center rounded-full bg-accent text-accent-ink shadow-[0_3px_0_0_var(--accent-lip)] transition-shadow duration-200 focus-within:shadow-[0_3px_0_0_var(--accent-lip),0_0_0_4px_var(--accent-glow)]"
       >
         <input
           ref={inputRef}
@@ -249,7 +249,7 @@ export default function SearchBar() {
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => choose(option)}
                     className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors ${
-                      index === active ? "bg-white/10" : "hover:bg-white/5"
+                      index === active ? "bg-foreground/10" : "hover:bg-foreground/5"
                     }`}
                   >
                     {option.kind === "library" ? (

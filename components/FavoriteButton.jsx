@@ -3,7 +3,7 @@
 import { Heart } from "lucide-react";
 import { useFavorite } from "@/lib/use-favorite";
 
-export default function FavoriteButton({ track, className = "icon-btn", size = 20 }) {
+export default function FavoriteButton({ track, className = "icon-btn", size = 20, flip }) {
   const { isFavorite, busy, toggle } = useFavorite(track);
 
   return (
@@ -13,6 +13,7 @@ export default function FavoriteButton({ track, className = "icon-btn", size = 2
       disabled={busy}
       aria-label={isFavorite ? "Bỏ yêu thích" : "Thêm vào yêu thích"}
       aria-pressed={isFavorite}
+      data-flip={flip}
       className={`${className} ${isFavorite ? "text-danger" : ""}`}
     >
       <Heart

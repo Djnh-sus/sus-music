@@ -10,7 +10,7 @@ export default function TrackCard({ title, subtitle, thumbnail, onPlay, track, f
   const active = Boolean(track) && currentTrack?.videoId === track.videoId;
 
   return (
-    <div className={`group relative snap-start ${fluid ? "w-full" : "w-40 shrink-0"}`}>
+    <div className={`group card-lift snap-start ${fluid ? "w-full" : "w-40 shrink-0"}`}>
       <button type="button" onClick={onPlay} className="block w-full text-left">
         <div
           className={`relative mb-3 aspect-square w-full overflow-hidden rounded-2xl border-2 bg-surface-2 transition-colors duration-200 ${
@@ -26,7 +26,7 @@ export default function TrackCard({ title, subtitle, thumbnail, onPlay, track, f
             />
           ) : null}
           {active && (
-            <span className="absolute bottom-2 left-2 rounded-full bg-black/65 px-2.5 py-1.5">
+            <span className="absolute bottom-2 left-2 rounded-full bg-scrim/65 px-2.5 py-1.5">
               <Equalizer playing={isPlaying} />
             </span>
           )}
@@ -41,7 +41,7 @@ export default function TrackCard({ title, subtitle, thumbnail, onPlay, track, f
         <TrackMenu
           track={track}
           buttonClassName="min-h-9 min-w-9"
-          className="card-menu absolute right-1.5 top-1.5 rounded-full bg-black/60"
+          className="card-menu absolute right-1.5 top-1.5 rounded-full bg-scrim/60"
         />
       )}
     </div>

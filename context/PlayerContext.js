@@ -12,12 +12,14 @@ import {
 import { loadYouTubeIframeAPI } from "@/lib/youtube-iframe-loader";
 import { logBg } from "@/lib/bg-log";
 import { authedFetch } from "@/lib/authed-fetch";
+import { fetchRadioBatch } from "@/lib/reco-client";
 import { startKeepAlive, stopKeepAlive } from "@/lib/keepalive-audio";
 import { useAuth } from "@/context/AuthContext";
-import { loadPlayerState, savePlayerState } from "@/lib/player-storage";
+import { clearPlayerState, loadPlayerState, savePlayerState } from "@/lib/player-storage";
 
 const PlayerContext = createContext(null);
 const PlayerTimeContext = createContext(null);
+const NowPlayingUiContext = createContext(null);
 
 const RESTART_THRESHOLD_SECONDS = 3;
 const SEEK_STEP_SECONDS = 10;
@@ -34,6 +36,7 @@ const RESUME_STORAGE_KEY = "yt-player-resume-on-hide";
 const OWN_PAUSE_MARK_MS = 1500;
 const AUTOPLAY_STORAGE_KEY = "yt-autoplay";
 const RADIO_BATCH = 20;
+const RADIO_COOLDOWN_MS = 60 * 1000;
 const ALTERNATE_CODES = [100, 101, 150];
 
 function readAutoplaySetting() {
@@ -120,7 +123,9 @@ export function PlayerProvider({ children }) {
   const [autoplay, setAutoplayState] = useState(readAutoplaySetting);
   const autoplayRef = useRef(autoplay);
   const radioSeqRef = useRef(0);
-  const radioBusyRef = useRef(false);
+  const radioPendingRef = useRef(null);
+  const radioCooldownRef = useRef(0);
+  const requestRadioRef = useRef(null);
   const startAtRef = useRef(null);
   const userIdRef = useRef(null);
   const restoreDoneRef = useRef(null);
@@ -200,6 +205,12 @@ export function PlayerProvider({ children }) {
   }, [setQueueSynced, setCurrentIndexSynced, updateSleepTimer]);
 
   useEffect(() => onSignedOut(resetPlayer), [onSignedOut, resetPlayer]);
+
+  const closePlayer = useCallback(() => {
+    resetPlayer();
+    restoreDoneRef.current = userIdRef.current;
+    if (userIdRef.current) clearPlayerState(userIdRef.current);
+  }, [resetPlayer]);
 
   const showPlaybackError = useCallback((message, autoClear) => {
     clearTimeout(errorTimerRef.current);
@@ -391,8 +402,24 @@ export function PlayerProvider({ children }) {
     }
 
     const next = currentIndexRef.current + 1;
-    if (next < queueRef.current.length) loadIndex(next);
-    else if (repeatRef.current === "all" && queueRef.current.length > 0) loadIndex(0);
+    const queueNow = queueRef.current;
+    if (next < queueNow.length) {
+      loadIndex(next);
+      return;
+    }
+    if (repeatRef.current === "all" && queueNow.length > 0) {
+      loadIndex(0);
+      return;
+    }
+    if (autoplayRef.current && repeatRef.current === "off" && queueNow.length > 0) {
+      const seq = radioSeqRef.current;
+      requestRadioRef.current?.(queueNow[queueNow.length - 1])?.then((added) => {
+        const following = currentIndexRef.current + 1;
+        if (added > 0 && seq === radioSeqRef.current && following < queueRef.current.length) {
+          loadIndex(following);
+        }
+      });
+    }
   }, [loadIndex, updateSleepTimer]);
 
   const playQueue = useCallback(
@@ -426,6 +453,16 @@ export function PlayerProvider({ children }) {
       loadIndex(index);
     },
     [isReady, makeEntry, setQueueSynced, loadIndex]
+  );
+
+  const playShuffled = useCallback(
+    (tracks) => {
+      if (!tracks?.length) return;
+      shuffleRef.current = true;
+      setShuffle(true);
+      playQueue(tracks, Math.floor(Math.random() * tracks.length));
+    },
+    [playQueue]
   );
 
   const addToQueue = useCallback(
@@ -518,29 +555,53 @@ export function PlayerProvider({ children }) {
   }, [setQueueSynced]);
 
   const requestRadio = useCallback(
-    async (seed) => {
-      if (!seed || radioBusyRef.current) return;
-      radioBusyRef.current = true;
+    (seed) => {
+      if (!seed) return Promise.resolve(0);
       const seq = radioSeqRef.current;
+      if (radioPendingRef.current?.seq === seq) return radioPendingRef.current.promise;
 
-      try {
-        const params = new URLSearchParams({
-          videoId: seed.videoId,
-          title: seed.title || "",
-          channel: seed.channelTitle || "",
-        });
-        if (seed.channelId) params.set("channelId", seed.channelId);
+      const run = async () => {
+        let items = [];
+        try {
+          const forUser = userIdRef.current;
+          if (forUser) {
+            items = await fetchRadioBatch({
+              userId: forUser,
+              seed,
+              excludeIds: queueRef.current.map((entry) => entry.videoId),
+              limit: RADIO_BATCH,
+            });
+          }
+        } catch {
+          items = [];
+        }
 
-        const res = await authedFetch(`/api/youtube/next?${params}`);
-        const data = await res.json();
-        if (!res.ok || seq !== radioSeqRef.current) return;
+        if (items.length < 3) {
+          try {
+            const params = new URLSearchParams({
+              videoId: seed.videoId,
+              title: seed.title || "",
+              channel: seed.channelTitle || "",
+            });
+            if (seed.channelId) params.set("channelId", seed.channelId);
+            const res = await authedFetch(`/api/youtube/next?${params}`);
+            const data = await res.json();
+            if (res.ok) items = data.items || [];
+          } catch {
+          }
+        }
+
+        if (seq !== radioSeqRef.current) return 0;
 
         const known = new Set(queueRef.current.map((entry) => entry.videoId));
-        const fresh = (data.items || [])
+        const fresh = items
           .filter((track) => !known.has(track.videoId))
           .slice(0, RADIO_BATCH)
           .map((track) => makeEntry({ ...track, origin: "radio" }));
-        if (fresh.length === 0) return;
+        if (fresh.length === 0) {
+          radioCooldownRef.current = Date.now() + RADIO_COOLDOWN_MS;
+          return 0;
+        }
 
         if (shuffleRef.current) {
           shuffleOriginalRef.current = [
@@ -549,13 +610,86 @@ export function PlayerProvider({ children }) {
           ];
         }
         setQueueSynced([...queueRef.current, ...fresh]);
-      } catch {
-      } finally {
-        radioBusyRef.current = false;
-      }
+        return fresh.length;
+      };
+
+      const promise = run().finally(() => {
+        if (radioPendingRef.current?.promise === promise) radioPendingRef.current = null;
+      });
+      radioPendingRef.current = { seq, promise };
+      return promise;
     },
     [makeEntry, setQueueSynced]
   );
+
+  useEffect(() => {
+    requestRadioRef.current = requestRadio;
+  }, [requestRadio]);
+
+  const refreshRadio = useCallback(async () => {
+    const index = currentIndexRef.current;
+    const seed = queueRef.current[index];
+    const forUser = userIdRef.current;
+    if (!seed || index < 0 || !forUser) return { ok: false, reason: "empty" };
+
+    radioSeqRef.current += 1;
+    const seq = radioSeqRef.current;
+    radioPendingRef.current = null;
+
+    const isReplaceable = (entry, i) => i > index && entry.origin === "radio";
+    const replaced = queueRef.current.filter(isReplaceable).map((entry) => entry.videoId);
+    const kept = queueRef.current.filter((entry, i) => !isReplaceable(entry, i));
+
+    let items = [];
+    try {
+      items = await fetchRadioBatch({
+        userId: forUser,
+        seed,
+        excludeIds: [...kept.map((entry) => entry.videoId), ...replaced],
+        limit: RADIO_BATCH,
+      });
+    } catch {
+      items = [];
+    }
+
+    if (items.length < 3) {
+      try {
+        const params = new URLSearchParams({
+          videoId: seed.videoId,
+          title: seed.title || "",
+          channel: seed.channelTitle || "",
+        });
+        if (seed.channelId) params.set("channelId", seed.channelId);
+        const res = await authedFetch(`/api/youtube/next?${params}`);
+        const data = await res.json();
+        if (res.ok) items = data.items || [];
+      } catch {
+      }
+    }
+
+    if (seq !== radioSeqRef.current) return { ok: false, reason: "stale" };
+
+    const latestIndex = currentIndexRef.current;
+    const latest = queueRef.current.filter(
+      (entry, i) => !(i > latestIndex && entry.origin === "radio")
+    );
+    const blocked = new Set([...latest.map((entry) => entry.videoId), ...replaced]);
+    const fresh = items
+      .filter((track) => !blocked.has(track.videoId))
+      .slice(0, RADIO_BATCH)
+      .map((track) => makeEntry({ ...track, origin: "radio" }));
+    if (fresh.length === 0) return { ok: false, reason: "empty" };
+
+    if (shuffleRef.current) {
+      const keptIds = new Set(latest.map((entry) => entry.queueId));
+      shuffleOriginalRef.current = [
+        ...shuffleOriginalRef.current.filter((id) => keptIds.has(id)),
+        ...fresh.map((entry) => entry.queueId),
+      ];
+    }
+    setQueueSynced([...latest, ...fresh]);
+    return { ok: true, count: fresh.length };
+  }, [makeEntry, setQueueSynced]);
 
   const playTrackWithRadio = useCallback(
     (track, options = {}) => {
@@ -576,12 +710,11 @@ export function PlayerProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    if (!autoplay || currentIndex < 0 || queue.length === 0) return;
+    if (!autoplay || repeat !== "off" || currentIndex < 0 || queue.length === 0) return;
     if (queue.length - 1 - currentIndex > 2) return;
-    const last = queue[queue.length - 1];
-    if (last?.origin !== "radio") return;
-    requestRadio(last);
-  }, [autoplay, currentIndex, queue, requestRadio]);
+    if (Date.now() < radioCooldownRef.current) return;
+    requestRadio(queue[queue.length - 1]);
+  }, [autoplay, repeat, currentIndex, queue, requestRadio]);
 
   const toggleShuffle = useCallback(() => {
     const turningOn = !shuffleRef.current;
@@ -987,9 +1120,7 @@ export function PlayerProvider({ children }) {
       playbackError,
       playerLoadError,
       retryLoadPlayer,
-      isNowPlayingOpen,
-      openNowPlaying,
-      closeNowPlaying,
+      closePlayer,
       videoContainerRef: containerRef,
       miniThumbRef,
       shuffle,
@@ -999,6 +1130,7 @@ export function PlayerProvider({ children }) {
       sleepTimer,
       resumeOnHide,
       playQueue,
+      playShuffled,
       playTrackWithRadio,
       autoplay,
       setAutoplay,
@@ -1013,6 +1145,7 @@ export function PlayerProvider({ children }) {
       removeFromQueue,
       moveInQueue,
       clearUpcoming,
+      refreshRadio,
       toggleShuffle,
       cycleRepeat,
       setVolume,
@@ -1030,9 +1163,7 @@ export function PlayerProvider({ children }) {
       playbackError,
       playerLoadError,
       retryLoadPlayer,
-      isNowPlayingOpen,
-      openNowPlaying,
-      closeNowPlaying,
+      closePlayer,
       containerRef,
       miniThumbRef,
       shuffle,
@@ -1042,6 +1173,7 @@ export function PlayerProvider({ children }) {
       sleepTimer,
       resumeOnHide,
       playQueue,
+      playShuffled,
       playTrackWithRadio,
       autoplay,
       setAutoplay,
@@ -1056,6 +1188,7 @@ export function PlayerProvider({ children }) {
       removeFromQueue,
       moveInQueue,
       clearUpcoming,
+      refreshRadio,
       toggleShuffle,
       cycleRepeat,
       setVolume,
@@ -1067,10 +1200,15 @@ export function PlayerProvider({ children }) {
 
   const timeValue = useMemo(() => ({ currentTime, duration }), [currentTime, duration]);
 
+  const uiValue = useMemo(
+    () => ({ isNowPlayingOpen, openNowPlaying, closeNowPlaying }),
+    [isNowPlayingOpen, openNowPlaying, closeNowPlaying]
+  );
+
   return (
     <PlayerContext.Provider value={stateValue}>
       <PlayerTimeContext.Provider value={timeValue}>
-        {children}
+        <NowPlayingUiContext.Provider value={uiValue}>{children}</NowPlayingUiContext.Provider>
       </PlayerTimeContext.Provider>
     </PlayerContext.Provider>
   );
@@ -1085,5 +1223,11 @@ export function usePlayer() {
 export function usePlayerTime() {
   const ctx = useContext(PlayerTimeContext);
   if (!ctx) throw new Error("usePlayerTime() phải được gọi bên trong PlayerProvider");
+  return ctx;
+}
+
+export function useNowPlayingUi() {
+  const ctx = useContext(NowPlayingUiContext);
+  if (!ctx) throw new Error("useNowPlayingUi() phải được gọi bên trong PlayerProvider");
   return ctx;
 }

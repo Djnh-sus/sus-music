@@ -120,7 +120,7 @@ export default function SharedPlaylistPage() {
             {tracks.map((track, index) => (
               <li
                 key={`${track.videoId}:${index}`}
-                className="flex items-center gap-1 rounded-2xl px-2 py-1.5 transition-colors hover:bg-white/5"
+                className="flex items-center gap-1 rounded-2xl px-2 py-1.5 transition-colors hover:bg-foreground/5"
               >
                 <button
                   type="button"

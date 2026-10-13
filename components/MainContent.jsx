@@ -2,11 +2,11 @@
 
 import { usePlayer } from "@/context/PlayerContext";
 
-export default function MainContent({ children }) {
+export default function MainContent({ children, className = "" }) {
   const { currentTrack } = usePlayer();
 
   return (
-    <main className="app-main" data-player={currentTrack ? "true" : "false"}>
+    <main className={`app-main ${className}`.trim()} data-player={currentTrack ? "true" : "false"}>
       {children}
     </main>
   );

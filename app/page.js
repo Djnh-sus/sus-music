@@ -1,12 +1,9 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { Compass } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import EmptyState from "@/components/EmptyState";
-import LoginButton from "@/components/LoginButton";
-import Logo from "@/components/Logo";
 import PlaylistCard from "@/components/PlaylistCard";
 import ResumeCard from "@/components/ResumeCard";
 import Shelf from "@/components/Shelf";
@@ -16,7 +13,7 @@ import { usePlayer } from "@/context/PlayerContext";
 import { useAuth } from "@/context/AuthContext";
 import {
   cleanItems,
-  topChannels,
+  useHomeShelves,
   useRecommendation,
   useSubscriptionFeed,
 } from "@/lib/recommendations";
@@ -62,12 +59,44 @@ function RecommendationShelf({ title, subtitle, state, onPlay, quiet = false }) 
   );
 }
 
+function EngineShelves({ state, onPlay }) {
+  if (state.status === "idle") return null;
+  if (state.status === "loading" && state.shelves.length === 0) return <ShelfSkeleton />;
+
+  if (state.status === "error") {
+    return (
+      <section className="mb-10">
+        <h2 className="font-display text-xl font-extrabold md:text-2xl">Gợi ý cho bạn</h2>
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-2xl border-2 border-border bg-surface/60 px-4 py-3">
+          <p className="min-w-0 flex-1 text-sm text-danger">{state.error}</p>
+          <button type="button" onClick={state.reload} className="btn-ghost py-1.5 text-sm">
+            Thử lại
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  return state.shelves.map((shelf) => (
+    <Shelf key={shelf.id} title={shelf.title} subtitle={shelf.subtitle}>
+      {shelf.items.map((track, index) => (
+        <TrackCard
+          key={track.videoId}
+          title={track.title}
+          subtitle={track.channelTitle}
+          thumbnail={track.thumbnail}
+          onPlay={() => onPlay(shelf.items, index)}
+          track={track}
+        />
+      ))}
+    </Shelf>
+  ));
+}
+
 function HomeContent() {
   const { user, userId, loading } = useAuth();
   const [dashboard, setDashboard] = useState(null);
   const { playQueue, playTrackWithRadio } = usePlayer();
-  const searchParams = useSearchParams();
-  const loginError = searchParams.get("login_error");
 
   const loadDashboard = async (forUserId) => {
     const [{ data: history }, { data: pls }, { data: favs }] = await Promise.all([
@@ -91,7 +120,6 @@ function HomeContent() {
     setDashboard({
       userId: forUserId,
       history: uniqueByVideoId(history, 10),
-      channels: topChannels(history),
       playlists: pls || [],
       favorites: favs || [],
     });
@@ -107,61 +135,26 @@ function HomeContent() {
   const recentHistory = shown?.history ?? [];
   const playlists = shown?.playlists ?? [];
   const favorites = shown?.favorites ?? [];
-  const channels = shown?.channels ?? [];
 
   const searchTerms = useMemo(() => (userId ? loadSearchHistory(userId) : []), [userId]);
 
-  const suggestQuery = searchTerms[0] ?? channels[0] ?? null;
-  const suggestNote = searchTerms[0]
-    ? `Vì bạn vừa tìm “${searchTerms[0]}”`
-    : channels[0]
-      ? `Vì bạn hay nghe ${channels[0]}`
-      : null;
-
-  const suggestLower = (suggestQuery ?? "").toLowerCase();
-  const channelPick = channels.find((name) => name.toLowerCase() !== suggestLower) ?? null;
-  const termPick = searchTerms.find((term) => term.toLowerCase() !== suggestLower) ?? null;
-  const recommendQuery = channelPick ?? termPick;
-  const recommendNote = channelPick
-    ? `Từ kênh bạn hay nghe: ${channelPick}`
-    : termPick
-      ? `Thêm về “${termPick}”`
-      : null;
+  const suggestQuery = searchTerms[0] ?? null;
+  const suggestNote = suggestQuery ? `Vì bạn vừa tìm “${suggestQuery}”` : null;
 
   const suggestState = useRecommendation(shown ? userId : null, suggestQuery);
-  const recommendState = useRecommendation(shown ? userId : null, recommendQuery);
   const feedState = useSubscriptionFeed(shown ? userId : null);
+  const homeState = useHomeShelves(shown ? userId : null);
 
   const recentIds = new Set(recentHistory.map((h) => h.video_id));
-  const suggestItems = cleanItems(suggestState.items, recentIds);
-  const usedIds = new Set([...recentIds, ...suggestItems.map((item) => item.videoId)]);
-  const recommendItems = cleanItems(recommendState.items, usedIds);
-  const allUsedIds = new Set([...usedIds, ...recommendItems.map((item) => item.videoId)]);
+  const engineIds = new Set(homeState.shelves.flatMap((shelf) => shelf.items.map((t) => t.videoId)));
+  const usedIds = new Set([...recentIds, ...engineIds]);
+  const suggestItems = cleanItems(suggestState.items, usedIds);
+  const allUsedIds = new Set([...usedIds, ...suggestItems.map((item) => item.videoId)]);
   const feedItems = cleanItems(feedState.items, allUsedIds);
 
   if (loading) return <PageSkeleton />;
 
-  if (!user) {
-    return (
-      <div className="fade-in mx-auto flex min-h-[78vh] max-w-xl flex-col items-center justify-center gap-5 px-6 text-center">
-        <Logo size={120} className="bob" />
-        <h1 className="font-display text-5xl font-extrabold leading-none md:text-6xl">
-          SUS <span className="text-accent">Music</span>
-        </h1>
-        <p className="max-w-sm text-muted">
-          Nghe nhạc và video YouTube theo cách của riêng bạn: playlist, yêu thích và lịch sử đồng bộ
-          trên mọi thiết bị.
-        </p>
-        {loginError && (
-          <p className="max-w-sm text-sm text-danger">
-            Đăng nhập thất bại
-            {loginError !== "timeout" ? `: ${loginError}` : " (quá thời gian chờ)"}. Thử lại nhé.
-          </p>
-        )}
-        <LoginButton />
-      </div>
-    );
-  }
+  if (!user) return null;
 
   if (!shown) {
     return (
@@ -199,12 +192,20 @@ function HomeContent() {
 
       <ResumeCard userId={userId} />
 
-      <RecommendationShelf
-        title="Gợi ý"
-        subtitle={suggestNote}
-        state={{ ...suggestState, items: suggestItems }}
+      <EngineShelves
+        state={homeState}
         onPlay={(items, index) => playTrackWithRadio(items[index])}
       />
+
+      {suggestQuery && (
+        <RecommendationShelf
+          title="Gợi ý theo tìm kiếm"
+          subtitle={suggestNote}
+          state={{ ...suggestState, items: suggestItems }}
+          onPlay={(items, index) => playTrackWithRadio(items[index])}
+          quiet
+        />
+      )}
 
       <RecommendationShelf
         title="Mới từ kênh bạn đăng ký"
@@ -212,13 +213,6 @@ function HomeContent() {
         state={{ ...feedState, items: feedItems }}
         onPlay={(items, index) => playTrackWithRadio(items[index])}
         quiet
-      />
-
-      <RecommendationShelf
-        title="Đề xuất"
-        subtitle={recommendNote}
-        state={{ ...recommendState, items: recommendItems }}
-        onPlay={(items, index) => playTrackWithRadio(items[index])}
       />
 
       {recentHistory.length > 0 && (

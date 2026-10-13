@@ -97,7 +97,7 @@ export default function FollowButton({ track }) {
       onClick={toggle}
       disabled={busy}
       aria-pressed={current.subscribed}
-      className={`flex items-center gap-1.5 rounded-full border-2 px-3.5 py-1 text-sm font-bold transition disabled:opacity-60 ${
+      className={`pressable flex items-center gap-1.5 rounded-full border-2 px-3.5 py-1 text-sm font-bold disabled:opacity-60 ${
         current.subscribed
           ? "border-accent text-accent"
           : "border-border text-foreground hover:border-accent"

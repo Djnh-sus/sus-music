@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronLeft,
@@ -21,21 +21,11 @@ import { useFavorite } from "@/lib/use-favorite";
 import { addTrackToPlaylist } from "@/lib/playlist-ops";
 import { copyText } from "@/lib/clipboard";
 import { youtubeWatchUrl } from "@/lib/youtube-url";
+import { usePopover } from "@/lib/use-popover";
+import MenuItem, { menuItemClass } from "@/components/MenuItem";
 
 const PANEL_HEIGHT_ESTIMATE = 360;
 const PANEL_WIDTH = 256;
-
-const itemClass =
-  "flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm transition-colors hover:bg-white/8 disabled:opacity-50";
-
-function MenuItem({ icon: Icon, danger = false, children, ...props }) {
-  return (
-    <button type="button" role="menuitem" className={`${itemClass} ${danger ? "text-danger" : ""}`} {...props}>
-      <Icon size={16} className={danger ? "shrink-0" : "shrink-0 text-muted"} />
-      <span className="min-w-0 truncate">{children}</span>
-    </button>
-  );
-}
 
 function TrackMenuPanel({ track, onClose, style, extraItems, panelRef }) {
   const { addToQueue, playNextInQueue } = usePlayer();
@@ -127,7 +117,7 @@ function TrackMenuPanel({ track, onClose, style, extraItems, panelRef }) {
             target="_blank"
             rel="noopener noreferrer"
             onClick={onClose}
-            className={itemClass}
+            className={menuItemClass}
           >
             <ExternalLink size={16} className="shrink-0 text-muted" />
             Mở trên YouTube
@@ -153,7 +143,7 @@ function TrackMenuPanel({ track, onClose, style, extraItems, panelRef }) {
             type="button"
             onClick={() => setView("main")}
             aria-label="Quay lại"
-            className="flex w-full items-center gap-1 px-3 py-2 text-left text-sm font-semibold text-muted transition-colors hover:bg-white/8"
+            className="flex w-full items-center gap-1 px-3 py-2 text-left text-sm font-semibold text-muted transition-colors hover:bg-foreground/8"
           >
             <ChevronLeft size={16} /> Chọn playlist
           </button>
@@ -174,64 +164,19 @@ function TrackMenuPanel({ track, onClose, style, extraItems, panelRef }) {
   );
 }
 
-export default function TrackMenu({ track, className = "", buttonClassName = "", extraItems = [] }) {
-  const [panelStyle, setPanelStyle] = useState(null);
-  const rootRef = useRef(null);
-  const buttonRef = useRef(null);
-  const panelRef = useRef(null);
-  const open = panelStyle !== null;
-
-  const close = () => setPanelStyle(null);
-
-  const toggle = () => {
-    if (open) {
-      close();
-      return;
-    }
-    const rect = buttonRef.current.getBoundingClientRect();
-    const left = Math.max(
-      8,
-      Math.min(rect.right - PANEL_WIDTH, window.innerWidth - PANEL_WIDTH - 8)
-    );
-    const opensUp =
-      rect.bottom + PANEL_HEIGHT_ESTIMATE > window.innerHeight && rect.top > PANEL_HEIGHT_ESTIMATE;
-    setPanelStyle(
-      opensUp
-        ? { left, bottom: window.innerHeight - rect.top + 4, transformOrigin: "bottom right" }
-        : { left, top: rect.bottom + 4 }
-    );
-  };
-
-  useEffect(() => {
-    if (!open) return;
-
-    const onPointerDown = (e) => {
-      if (rootRef.current?.contains(e.target) || panelRef.current?.contains(e.target)) return;
-      setPanelStyle(null);
-    };
-    const onKeyDown = (e) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setPanelStyle(null);
-      }
-    };
-    const onResize = () => setPanelStyle(null);
-    const onScroll = (e) => {
-      if (panelRef.current?.contains(e.target)) return;
-      setPanelStyle(null);
-    };
-
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    window.addEventListener("resize", onResize);
-    window.addEventListener("scroll", onScroll, true);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("resize", onResize);
-      window.removeEventListener("scroll", onScroll, true);
-    };
-  }, [open]);
+export default function TrackMenu({
+  track,
+  className = "",
+  buttonClassName = "",
+  extraItems = [],
+  placement = "auto",
+  icon: Icon = MoreHorizontal,
+}) {
+  const { open, style, toggle, close, rootRef, buttonRef, panelRef } = usePopover({
+    width: PANEL_WIDTH,
+    heightEstimate: PANEL_HEIGHT_ESTIMATE,
+    placement,
+  });
 
   return (
     <div ref={rootRef} className={className}>
@@ -244,14 +189,14 @@ export default function TrackMenu({ track, className = "", buttonClassName = "",
         aria-expanded={open}
         className={`icon-btn ${buttonClassName}`}
       >
-        <MoreHorizontal size={19} />
+        <Icon size={19} />
       </button>
       {open &&
         createPortal(
           <TrackMenuPanel
             track={track}
             onClose={close}
-            style={panelStyle}
+            style={style}
             extraItems={extraItems}
             panelRef={panelRef}
           />,

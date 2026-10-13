@@ -14,7 +14,7 @@ export default function TrackResultItem({ track, onPlay, onAddToQueue }) {
   return (
     <li
       className={`group flex items-center gap-3 rounded-2xl px-2 py-2 transition-colors ${
-        active ? "bg-surface" : "hover:bg-white/5"
+        active ? "bg-surface" : "hover:bg-foreground/5"
       }`}
     >
       <button
@@ -31,20 +31,20 @@ export default function TrackResultItem({ track, onPlay, onAddToQueue }) {
             className="h-full w-full object-cover transition-transform duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:scale-110"
           />
         ) : null}
-        <span className="absolute inset-0 flex items-center justify-center bg-black/45 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
+        <span className="absolute inset-0 flex items-center justify-center bg-scrim/45 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
           <span className="flex h-10 w-10 items-center justify-center rounded-full bg-accent text-accent-ink shadow-[0_3px_0_0_var(--accent-lip)]">
             <Play size={18} fill="currentColor" />
           </span>
         </span>
         {active && (
-          <span className="absolute bottom-1.5 left-1.5 rounded-full bg-black/65 px-2 py-1">
+          <span className="absolute bottom-1.5 left-1.5 rounded-full bg-scrim/65 px-2 py-1">
             <Equalizer playing={isPlaying} />
           </span>
         )}
         {durationLabel && (
           <span
             className={`absolute bottom-1.5 right-1.5 rounded-md px-1.5 py-0.5 text-[11px] font-bold ${
-              track.isLive ? "bg-brand-red text-white" : "bg-black/70 text-foreground"
+              track.isLive ? "bg-brand-red text-foreground" : "bg-scrim/70 text-foreground"
             }`}
           >
             {durationLabel}

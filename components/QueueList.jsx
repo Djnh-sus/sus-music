@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, GripVertical, ListPlus, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, GripVertical, ListPlus, RefreshCw, Trash2, X } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/context/ToastContext";
@@ -25,11 +25,13 @@ export default function QueueList({ scroll = false }) {
     removeFromQueue,
     moveInQueue,
     clearUpcoming,
+    refreshRadio,
   } = usePlayer();
 
   const { listRef, drag, getHandleProps } = useDragReorder({ onMove: moveInQueue });
   const [fullRender, setFullRender] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const { userId } = useAuth();
   const { showToast } = useToast();
 
@@ -86,6 +88,19 @@ export default function QueueList({ scroll = false }) {
     }
   };
 
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const result = await refreshRadio();
+      if (!result.ok && result.reason === "empty") {
+        showToast("Chưa tìm được gợi ý mới, giữ nguyên danh sách hiện tại", { type: "error" });
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const rowLimit = fullRender ? queue.length : Math.max(INITIAL_ROWS, currentIndex + 8);
   const hasUpcoming = currentIndex >= 0 && currentIndex < queue.length - 1;
 
@@ -111,18 +126,31 @@ export default function QueueList({ scroll = false }) {
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold text-muted transition hover:bg-white/10 hover:text-foreground disabled:opacity-50"
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold text-muted transition hover:bg-foreground/10 hover:text-foreground disabled:opacity-50"
           >
             <ListPlus size={13} />
             {saving ? "Đang lưu..." : "Lưu playlist"}
           </button>
+          {currentIndex >= 0 && (
+            <button
+              type="button"
+              onClick={handleRefresh}
+              disabled={refreshing}
+              title="Làm mới gợi ý"
+              aria-label="Làm mới gợi ý"
+              aria-busy={refreshing}
+              className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition hover:bg-foreground/10 hover:text-foreground disabled:opacity-60"
+            >
+              <RefreshCw size={14} className={refreshing ? "spin" : ""} />
+            </button>
+          )}
           {hasUpcoming && (
             <button
               type="button"
               onClick={clearUpcoming}
               title="Xoá các bài phía sau"
               aria-label="Xoá các bài phía sau"
-              className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition hover:bg-white/10 hover:text-foreground"
+              className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition hover:bg-foreground/10 hover:text-foreground"
             >
               <Trash2 size={14} />
             </button>
@@ -156,7 +184,7 @@ export default function QueueList({ scroll = false }) {
               key={track.queueId}
               className={`group row-lazy relative flex items-center gap-1 rounded-2xl pb-1.5 pl-1 pr-1 transition-colors ${
                 isFirstRadio ? "pt-7" : "pt-1.5"
-              } ${isCurrent ? "bg-surface-2" : "hover:bg-white/5"}${isPast ? " opacity-60" : ""}${dragClass(index)}`}
+              } ${isCurrent ? "bg-surface-2" : "hover:bg-foreground/5"}${isPast ? " opacity-60" : ""}${dragClass(index)}`}
             >
               {isFirstRadio && (
                 <span className="absolute left-3 top-2 text-[11px] font-bold text-muted">
@@ -190,7 +218,7 @@ export default function QueueList({ scroll = false }) {
                     <img src={track.thumbnail} alt="" className="h-full w-full object-cover" />
                   ) : null}
                   {isCurrent && (
-                    <span className="absolute inset-0 flex items-center justify-center bg-black/55">
+                    <span className="absolute inset-0 flex items-center justify-center bg-scrim/55">
                       <Equalizer playing={isPlaying} />
                     </span>
                   )}

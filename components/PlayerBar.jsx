@@ -1,19 +1,21 @@
 "use client";
 
 import { useRef } from "react";
-import { ChevronUp, Pause, Play, SkipBack, SkipForward } from "lucide-react";
-import { usePlayer, usePlayerTime } from "@/context/PlayerContext";
+import { ChevronUp, EllipsisVertical, Pause, Play, SkipBack, SkipForward, X } from "lucide-react";
+import { useNowPlayingUi, usePlayer, usePlayerTime } from "@/context/PlayerContext";
 import FavoriteButton from "@/components/FavoriteButton";
 import ProgressBar from "@/components/ProgressBar";
 import TimeLabel from "@/components/TimeLabel";
+import TrackMenu from "@/components/TrackMenu";
 import VolumeControl from "@/components/VolumeControl";
+import { useSettled } from "@/lib/use-settled";
 
 function MiniProgress() {
   const { currentTime, duration } = usePlayerTime();
   const percent = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
   return (
-    <div aria-hidden="true" className="absolute inset-x-0 -top-0.5 h-[3px] bg-white/10 md:hidden">
+    <div aria-hidden="true" className="absolute inset-x-0 -top-0.5 h-[3px] bg-foreground/10 md:hidden">
       <div
         className="h-full bg-accent transition-[width] duration-500 ease-linear"
         style={{ width: `${percent}%` }}
@@ -32,11 +34,12 @@ export default function PlayerBar() {
     togglePlay,
     playNext,
     playPrev,
-    isNowPlayingOpen,
-    openNowPlaying,
-    closeNowPlaying,
+    closePlayer,
     miniThumbRef,
   } = usePlayer();
+  const { isNowPlayingOpen, openNowPlaying, closeNowPlaying } = useNowPlayingUi();
+
+  const playingSettled = useSettled(isPlaying);
 
   const swipeRef = useRef(null);
   const suppressClickRef = useRef(false);
@@ -44,6 +47,7 @@ export default function PlayerBar() {
   if (!currentTrack) return null;
 
   const toggleExpanded = () => (isNowPlayingOpen ? closeNowPlaying() : openNowPlaying());
+  const showClose = !playingSettled && !isNowPlayingOpen;
 
   const activate = () => {
     if (suppressClickRef.current) {
@@ -54,7 +58,7 @@ export default function PlayerBar() {
   };
 
   const handleBarClick = (e) => {
-    if (e.target.closest("button, a, input, select, textarea, [role='slider']")) return;
+    if (e.target.closest("button, a, input, select, textarea, [role='slider'], [role='menu']")) return;
     activate();
   };
 
@@ -81,18 +85,19 @@ export default function PlayerBar() {
   return (
     <div
       className="player-bar bar-in"
+      data-open={isNowPlayingOpen}
       onClick={handleBarClick}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
     >
       <MiniProgress />
 
-      <div className="flex h-full items-center gap-2 px-3 md:gap-4 md:px-5">
+      <div className="flex h-full items-center gap-2 px-3 md:gap-2 md:px-5 lg:gap-4">
         <button
           type="button"
           onClick={activate}
           aria-label={isNowPlayingOpen ? "Thu nhỏ trình phát" : "Mở trình phát"}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left md:w-64 md:flex-none xl:w-72"
+          className="flex min-w-0 flex-1 items-center gap-3 text-left md:w-44 md:flex-none lg:w-64 xl:w-72"
         >
           <div
             ref={miniThumbRef}
@@ -104,7 +109,7 @@ export default function PlayerBar() {
             ) : null}
           </div>
 
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1" data-flip="title">
             <p className="truncate text-sm font-bold md:text-[15px]">{currentTrack.title}</p>
             {playbackError ? (
               <p className="truncate text-xs text-danger">{playbackError}</p>
@@ -114,7 +119,7 @@ export default function PlayerBar() {
           </div>
         </button>
 
-        <div className="hidden shrink-0 items-center gap-1 md:flex">
+        <div className="hidden shrink-0 items-center gap-1 md:flex" data-flip="transport">
           <button type="button" onClick={playPrev} aria-label="Bài trước" className="icon-btn">
             <SkipBack size={20} fill="currentColor" />
           </button>
@@ -139,25 +144,50 @@ export default function PlayerBar() {
         </div>
 
         <div className="hidden min-w-0 flex-1 items-center gap-3 md:flex">
-          <ProgressBar className="min-w-0 flex-1" />
-          <TimeLabel className="w-24 shrink-0 text-right text-xs tabular-nums text-muted" />
+          <div data-flip="progress" className="flex min-w-0 flex-1 items-center">
+            <ProgressBar className="min-w-0 flex-1" />
+          </div>
+          <TimeLabel
+            flip="time"
+            className="hidden w-24 shrink-0 text-right text-xs tabular-nums text-muted lg:block"
+          />
         </div>
 
-        <VolumeControl className="hidden shrink-0 2xl:flex" />
-        <FavoriteButton track={currentTrack} className="icon-btn hidden shrink-0 xl:inline-flex" />
+        <VolumeControl flip="volume" className="hidden shrink-0 2xl:flex" />
+        <FavoriteButton
+          track={currentTrack}
+          flip="heart"
+          className="icon-btn hidden shrink-0 xl:inline-flex"
+        />
+        <TrackMenu
+          track={currentTrack}
+          icon={EllipsisVertical}
+          placement="up"
+          className="hidden shrink-0 md:block"
+        />
         <button
           type="button"
-          onClick={toggleExpanded}
-          aria-label={isNowPlayingOpen ? "Thu nhỏ trình phát" : "Mở trình phát"}
-          aria-expanded={isNowPlayingOpen}
+          onClick={showClose ? closePlayer : toggleExpanded}
+          aria-label={
+            showClose ? "Đóng trình phát" : isNowPlayingOpen ? "Thu nhỏ trình phát" : "Mở trình phát"
+          }
+          aria-expanded={showClose ? undefined : isNowPlayingOpen}
           className="icon-btn hidden shrink-0 md:inline-flex"
         >
-          <ChevronUp
-            size={22}
-            className={`transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-              isNowPlayingOpen ? "rotate-180" : ""
-            }`}
-          />
+          <span className="relative block h-[22px] w-[22px]">
+            <ChevronUp
+              size={22}
+              className={`absolute inset-0 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out)] ${
+                showClose ? "rotate-90 scale-75 opacity-0" : "opacity-100"
+              } ${isNowPlayingOpen ? "rotate-180" : ""}`}
+            />
+            <X
+              size={22}
+              className={`absolute inset-0 transition-[opacity,transform] duration-300 [transition-timing-function:var(--ease-out)] ${
+                showClose ? "opacity-100" : "-rotate-90 scale-75 opacity-0"
+              }`}
+            />
+          </span>
         </button>
 
         <button

@@ -44,7 +44,7 @@ export default function PlaybackOptions() {
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border-2 border-border bg-surface/70 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 md:flex-nowrap">
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -68,6 +68,12 @@ export default function PlaybackOptions() {
           </button>
         </div>
 
+        <VolumeControl
+          flip="volume"
+          className="order-last w-full md:order-none md:w-auto md:min-w-0 md:flex-1"
+          sliderClassName="min-w-0 flex-1"
+        />
+
         <label className="flex items-center gap-2 text-sm text-muted">
           <Moon size={16} />
           <span className="sr-only">Hẹn giờ tắt</span>
@@ -86,9 +92,7 @@ export default function PlaybackOptions() {
         </label>
       </div>
 
-      <VolumeControl className="2xl:hidden" sliderClassName="min-w-0 flex-1" />
-
-      <label className="flex items-start gap-3 text-sm text-muted">
+      <label className="flex items-start gap-3 text-[13px] leading-snug text-muted">
         <input
           type="checkbox"
           checked={autoplay}
@@ -98,7 +102,7 @@ export default function PlaybackOptions() {
         <span>Tự động phát bài gợi ý khi hết hàng đợi</span>
       </label>
 
-      <label className="flex items-start gap-3 text-sm text-muted">
+      <label className="flex items-start gap-3 text-[13px] leading-snug text-muted">
         <input
           type="checkbox"
           checked={resumeOnHide}

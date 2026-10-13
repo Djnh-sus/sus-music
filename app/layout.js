@@ -3,13 +3,12 @@ import { AuthProvider } from "@/context/AuthContext";
 import { ToastProvider } from "@/context/ToastContext";
 import { PlayerProvider } from "@/context/PlayerContext";
 import PlayerBar from "@/components/PlayerBar";
-import Sidebar from "@/components/Sidebar";
 import PlayerSync from "@/components/PlayerSync";
-import TopBar from "@/components/TopBar";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import HistoryLogger from "@/components/HistoryLogger";
 import KeyboardShortcuts from "@/components/KeyboardShortcuts";
-import MainContent from "@/components/MainContent";
+import PressFeedback from "@/components/PressFeedback";
+import AppShell from "@/components/AppShell";
 import PlayerLoadErrorBanner from "@/components/PlayerLoadErrorBanner";
 import NowPlaying from "@/components/NowPlaying";
 
@@ -29,7 +28,7 @@ export const metadata = {
 };
 
 export const viewport = {
-  themeColor: "#33101f",
+  themeColor: "#2a0a0f",
   colorScheme: "dark",
   viewportFit: "cover",
 };
@@ -57,15 +56,14 @@ export default function RootLayout({ children }) {
         <ToastProvider>
           <AuthProvider>
             <PlayerProvider>
-              <Sidebar />
-              <TopBar />
-              <MainContent>{children}</MainContent>
+              <AppShell>{children}</AppShell>
               <PlayerBar />
               <PlayerLoadErrorBanner />
               <NowPlaying />
               <PlayerSync />
               <HistoryLogger />
               <KeyboardShortcuts />
+              <PressFeedback />
             </PlayerProvider>
           </AuthProvider>
         </ToastProvider>

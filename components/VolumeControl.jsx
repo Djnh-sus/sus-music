@@ -3,13 +3,13 @@
 import { Volume1, Volume2, VolumeX } from "lucide-react";
 import { usePlayer } from "@/context/PlayerContext";
 
-export default function VolumeControl({ className = "", sliderClassName = "w-24" }) {
+export default function VolumeControl({ className = "", sliderClassName = "w-24", flip }) {
   const { volume, isMuted, setVolume, toggleMute } = usePlayer();
   const shown = isMuted ? 0 : volume;
   const Icon = shown === 0 ? VolumeX : shown < 50 ? Volume1 : Volume2;
 
   return (
-    <div className={`flex items-center gap-1 ${className}`}>
+    <div className={`flex items-center gap-1 ${className}`} data-flip={flip}>
       <button
         type="button"
         onClick={toggleMute}

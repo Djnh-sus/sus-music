@@ -85,7 +85,7 @@ export default function Shelf({ title, subtitle, viewAllHref, children }) {
   };
 
   const arrowClass = (hidden) =>
-    `absolute top-20 z-10 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-accent text-accent-ink shadow-[0_3px_0_0_var(--accent-lip)] transition duration-200 md:flex ${
+    `pressable absolute top-20 z-10 hidden h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-accent text-accent-ink shadow-[0_3px_0_0_var(--accent-lip)] md:flex ${
       hidden ? "pointer-events-none scale-75 opacity-0" : "scale-100 opacity-100"
     }`;
 
@@ -107,7 +107,7 @@ export default function Shelf({ title, subtitle, viewAllHref, children }) {
         )}
       </div>
 
-      <div className="relative">
+      <div className="relative flow-root">
         <button
           type="button"
           aria-label="Cuộn sang trái"
@@ -137,7 +137,7 @@ export default function Shelf({ title, subtitle, viewAllHref, children }) {
           onClickCapture={handleClickCapture}
           data-dragging={dragging}
           style={dragging ? { scrollSnapType: "none", scrollBehavior: "auto" } : undefined}
-          className="shelf-scroll no-scrollbar -mx-1 snap-x snap-proximity overflow-x-auto scroll-smooth px-1 pb-2"
+          className="shelf-scroll no-scrollbar -mx-3 -mb-3 -mt-3 snap-x snap-proximity overflow-x-auto scroll-smooth scroll-px-3 px-3 pb-5 pt-3"
         >
           <div ref={trackRef} className="flex w-max gap-4">
             {children}

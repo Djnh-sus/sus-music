@@ -11,11 +11,11 @@ export default function TopBar() {
   const { user } = useAuth();
 
   return (
-    <header className="topbar">
+    <header className="topbar fade-in">
       <Link href="/" aria-label="Trang chủ" className="shrink-0 md:hidden">
         <Logo size={38} />
       </Link>
-      <div className="min-w-0 flex-1">
+      <div className="topbar-fill min-w-0 flex-1">
         {user && (
           <Suspense fallback={null}>
             <SearchBar />
